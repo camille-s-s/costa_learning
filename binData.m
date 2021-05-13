@@ -33,10 +33,10 @@ end
 slideBin = @(X, binStarts, binWidth, iBin, binDim) mean(X(:, :, binStarts(iBin) : binStarts(iBin) - 1 + binWidth), binDim);
 
 % Preallocate for subsequent loop.
-binnedX = NaN([nBins, size(X, [1 : binDim - 1])]);
+binnedX = NaN([size(X, [1 : binDim - 1]), nBins]);
 
 for iBin = 1:nBins
-    binnedX(iBin, :, :) = slideBin(X, binStarts, binWidth, iBin, binDim);
+    binnedX(:, :, iBin) = slideBin(X, binStarts, binWidth, iBin, binDim);
 end
 
 end
