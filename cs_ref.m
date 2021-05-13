@@ -144,7 +144,17 @@ trlInfoVarNames = {'trls_since_nov_stim', ... % trlssincenov: #trials since nove
     'event_times', ... % fixlock, stimlock, choice time, juicelock NO
     'aligned_event_times'}; % the above but with lockEventTime subtracted NO 
  
+% is it novel?
+% trials since novel?
+% value of best alternative?
+% value of worst alternative? 
+% is it rewarded?
+% READ CHOICE BEHAVIOR SECTION
+% expected value of novel option?
+% how quant opportunity cost? (empirical value (how get that) of best alternative option)....
 
+
+rewardProbChosenStim = arrayfun(@(t) T.reward_probs(t, T.choice_idx(t)), 1:nTrls)';
 % if 0 in col1,  next 3 col must be 0, 0, 999
 % if chose_nov_stim, chosen_stim must == nov_stim_idx
 
