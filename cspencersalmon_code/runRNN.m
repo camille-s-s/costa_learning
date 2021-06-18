@@ -1,7 +1,7 @@
 
 clearvars;
 close all
-% multiRNN = CS_RNN(struct( ...
+% multiRNN = fitRNN(struct( ...
 %     'dataset', 'raw_matched_trls', ...
 %     'normByRegion', false, ...
 %     'plotStatus', true, ...
@@ -341,76 +341,9 @@ for iTarget = 1:nRegions % One plot per target
     set(Ax3,'ylim', [ymin ymax])
     arrayfun(@(s) line(Ax3(s), get(Ax3(s),'xlim'), [0 0], 'linestyle', ':', 'color','black','linewidth', 1.5), 1:length(Ax3))
     
-    print('-dtiff', '-r400', [RNNfigdir, 'avg_currents_to_', rgns{iTarget,1}, '_', RNNname(1:end-4)])
+    print('-dtiff', '-r400', [RNNfigdir, 'pca_normed_currents_to_', rgns{iTarget,1}, '_', RNNname(1:end-4)])
     
 end
-
-
-
-%
-% for iStim = 3% 1:nStim
-%     during_stim = in_Stim{iStim};
-%     figure('color','w');
-%     AxP = arrayfun(@(i) subplot(3,3,i,'NextPlot', 'add', 'Box', 'on', 'TickDir','out', 'FontSize', 10, ...
-%         'CLim', [c_lim(1) c_lim(2)], 'xtick', '', 'ytick', ''), 1:nRegions^2);
-%     count = 1;
-%
-%     for iTarget = 1:nRegions
-%         iSort = all_sort{iTarget};
-%         in_target = in_Rgn{iTarget};
-%
-%         % pick out your downsampled rates
-%         Rplot = R_ds(in_target,during_stim);
-%
-%         % scale by mean of absolute value of rates for each neuron during
-%         % a given trial type
-%         Rplot = Rplot ./ repmat(mean(abs(Rplot),2),1,size(Rplot,2));
-%
-%         % sort by ascending lag of maximum firing in juice trials
-%         Rplot = Rplot(iSort,:);
-%
-%         % plot only rates within a given trial type and target region which
-%         % exceed 0.1
-%         % imagesc(Rplot(mean(Rplot,2) >= 0.1, :)), axis tight,
-%         % title(['Mdl activity (', regions{iTarget,1}, ')'])
-%
-%         % TO DO: STAGE THIS ABOVE PLOT
-%         for iSource = 1:nRegions
-%             in_source = in_Rgn{iSource};
-%
-%             % J(in_target,in_source) * RNN(in_source,:);
-%             P = J(in_target, in_source) * R_ds(in_source, :);
-%
-%             % TO DO: PICK OUT P CURRENT
-%             P_current = P(iSort, during_stim);
-%             P_current = P_current./repmat(mean(abs(P_current),2),1,size(P_current,2));
-%
-%             subplot(nRegions,nRegions,count); hold all; count = count + 1;
-%             imagesc(P_current(mean(Dplot{iTarget, iSource}, 2) >= 0.05, :)),
-%             axis tight;
-%             title(['Curr ', rgns{iSource,1} ' > ' rgns{iTarget,1}]);
-%             set(gca, 'xcolor', hist_colors(iSource,:), 'ycolor', hist_colors(iTarget,:), 'linewidth', 4)
-%
-%             if iSource == 1
-%                 ylabel(['Neurons in ', rgns{iTarget,1}],'FontWeight', 'bold')
-%             end
-%
-%             if iTarget == nRegions
-%                 xlabel('Time (s)','Color', 'k')
-%             end
-%         end
-%     end
-%
-% end
-%
-
-oldpos = get(AxP(6),'Position');
-colorbar(AxP(6)), colormap(brewermap(100,'*RdGy'));
-set(AxP(6),'Position',oldpos)
-
-print('-dtiff', '-r400', [RNNfigdir, 'between_rgn_currents_', RNNname(1:end-4)])
-close
-
 
 %% F. Magnitude of bidirectional currents from striatum to ACC (red, top)
 % and ACC to striatum (yellow, bottom) during presentation of the three
@@ -449,8 +382,6 @@ close
 
 c = [-3.5 3.5];
 cm = brewermap(100,'*RdBu');
-
-
 
 a = 0.01;
 
@@ -522,8 +453,6 @@ for iTarget = 1 %:nRegions
     print('-dtiff', '-r400', [RNNfigdir, 'mean_abs_currents_to_', rgns{iTarget,1}, '_', RNNname(1:end-4)])
     
 end
-
-
 
 close
 
