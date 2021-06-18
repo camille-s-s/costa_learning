@@ -30,13 +30,21 @@ else
 end
 
 % Define anonymous function for binning
-slideBin = @(X, binStarts, binWidth, iBin, binDim) mean(X(:, :, binStarts(iBin) : binStarts(iBin) - 1 + binWidth), binDim);
+if binDim == 3 % dumb way of doing this
+    slideBin = @(X, binStarts, binWidth, iBin, binDim) mean(X(:, :, binStarts(iBin) : binStarts(iBin) - 1 + binWidth), binDim);
+elseif binDim == 2
+    slideBin = @(X, binStarts, binWidth, iBin, binDim) mean(X(:, binStarts(iBin) : binStarts(iBin) - 1 + binWidth), binDim);
+end
 
 % Preallocate for subsequent loop.
 binnedX = NaN([size(X, [1 : binDim - 1]), nBins]);
 
 for iBin = 1:nBins
-    binnedX(:, :, iBin) = slideBin(X, binStarts, binWidth, iBin, binDim);
+    if binDim == 3
+        binnedX(:, :, iBin) = slideBin(X, binStarts, binWidth, iBin, binDim);
+    elseif binDim == 2
+        binnedX(:, iBin) = slideBin(X, binStarts, binWidth, iBin, binDim);
+    end
 end
 
 end
