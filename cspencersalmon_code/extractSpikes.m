@@ -51,7 +51,6 @@ lockEvent               = 'fixation';       % fixation, stim, choice, reward
 winBounds               = [0 2.8];          % in sec around lockEvent
 
 % data processing params
-normMethod              = 'none';           % 2norm, zscore, maxscale, none
 doSmooth                = true;             % true or false
 binSteps                = 10;               % in sample points, can be any number < dimensions of extracted window
 initBinSize             = 0.001;            % in msec; a function of original data sampling rate, also an assumption
@@ -72,7 +71,6 @@ end
 params.nipList          = nipList;
 params.lockEvent        = lockEvent;
 params.winBounds        = winBounds;
-params.normMethod       = normMethod;
 params.doSmooth         = doSmooth;
 params.binSteps         = binSteps;
 params.initBinSize      = initBinSize;
@@ -82,7 +80,7 @@ params.numDP            = numDP;
 
 tmpParams = params;
 
-paramStr = ['_smth_', num2str(doSmooth)', '_win_', num2str(binSteps), '_norm_' normMethod, '_bnstp_' num2str(binSteps)];
+paramStr = ['_smth_', num2str(doSmooth)', '_win_', num2str(binSteps), '_bnstp_' num2str(binSteps)];
 
 % define directories
 coderDir                = '~/Dropbox/costa_learning/data/coder_files/';
@@ -122,8 +120,9 @@ trlInfoVarNames = ...
 spikeInfoVarNames = {'monkey', 'array', 'date', 'nip', 'electrode', 'unit', 'port'};
 
 % create half-gaussian kernel
-w = gausswin(2*(smoothWidth/binSteps)); w(1:(smoothWidth/binSteps)) = [];
-
+% w = gausswin(2*(smoothWidth/binSteps)); w(1:(smoothWidth/binSteps)) = [];
+% create gaussian kernel
+w = gausswin(smoothWidth);
 %% Loop through neurophys and behavioral files to extract all spike info we
 % might care about and put all event info we might care about into a
 % helpful table. For my own edification extract spikes as well
@@ -290,6 +289,10 @@ for iCoder = 1:length(coderFiles)
         % initialize big long vector of unstacked trials
         allSpikes_curr = zeros(nUnits, nVecBins);
         
+        snipRawN = [];
+        snipFrN = [];
+        snipDsN = [];
+        
         tic
         for nn = 1:nUnits % For each unit in file
             
@@ -311,49 +314,35 @@ for iCoder = 1:length(coderFiles)
             % grab all spikes in alternative continuous format for RNNs
             spikeVec = double(ismember(allPossSpikeTimes, allSpikeTS));
             
-            % normalize
-            switch normMethod
-                case '2norm'
-                    toNorm = mean(N,2)~=0;
-                    Nnorm = zeros(size(N));
-                    Nnorm(toNorm,:) = normalize(N(toNorm,:),2,'norm'); % feature values proportionate to each other (euclidean norm) - each trial will be proportionate to each other
-                    N = Nnorm;
-                case 'zscore'
-                    N = zscore(N, 0, 2);
-                case 'maxscale'
-            end
-            
-            % calculate FR with sliding window of 100ms (#trials x #bins for ith unit)
+            % calculate FR with sliding gaussian window of 100ms (#trials x #bins for ith unit)
             padding = zeros(1, 0.5 * 10 * binSteps); % only for vector format since there is no extra data to pad with
-            % frN = binData(N, struct('sliding', true, 'binWidth', 10 * binSteps, 'step', 1)); % downsample(N', binSteps)'
-            % frSpikeVec = binData([padding spikeVec padding(1:end-1)], struct('sliding', true, 'binWidth', 10 * binSteps, 'step', 1)); % downsample(spikeVec, binSteps);
-            frN = movmean(N, 10 * binSteps, 2);
-            frSpikeVec = movmean([padding spikeVec padding], 10 * binSteps, 2);
-            
+
+            frN = cell2mat(arrayfun(@(t) conv(N(t,:), w, 'same'), 1 : nTrls, 'un', 0)');
+            frSpikeVec = conv([padding spikeVec padding], w, 'same');
             % trim off the extra bins at start and end
             overhang = round(-1 * (winBounds(2) - iStop) ./ initBinSize);
             frN = frN(:, overhang : end - overhang);
             frSpikeVec = frSpikeVec(:, length(padding) : end - length(padding) - 1);
+            
+            % put it back in Hz
+            frN = frN ./ (smoothWidth .* initBinSize); 
+            frSpikeVec = frSpikeVec ./ (smoothWidth .* initBinSize);
             
             if length(frSpikeVec) ~= length(spikeVec)
                 keyboard
             end
             
             % downsample
-            % dsN = binData(frN, struct('sliding', false, 'binWidth', binSteps)); % downsample(N', binSteps)'
-            % dsSpikeVec = binData(frSpikeVec, struct('sliding', false, 'binWidth', binSteps)); % downsample(spikeVec, binSteps);
             dsN = downsample(frN', binSteps)';
             dsSpikeVec = downsample(frSpikeVec, binSteps);
-            
-            %  smooth by kernel as wide as their binning window
-            if doSmooth
-                % smoothing with a half-gaussian
-                dsN = cell2mat(arrayfun(@(n) conv(dsN(n, :), w, 'same'), 1:size(dsN,1), 'un', 0)');
-                dsSpikeVec = conv(dsSpikeVec, w, 'same');
-            end
-            
+          
             alignedBinnedSpikes_curr(nn, :, :) = dsN;
             allSpikes_curr(nn, :) = dsSpikeVec;
+            
+            % grab first trial for plotting/sanity checking pre-processing
+            snipRawN(nn, :) = N(1, overhang : end - overhang);
+            snipFrN(nn, :) = frN(1, :);
+            snipDsN(nn, :) = dsN(1, :);
         end
         
         toc
@@ -371,6 +360,9 @@ for iCoder = 1:length(coderFiles)
         if nipNum == 1 % save for comparison for when you get common spiketimes
             allEvents_n1 = allEvents_curr;
             allSpikes_n1 = allSpikes_curr;
+            snipRawN_n1 = snipRawN;
+            snipFrN_n1 = snipFrN;
+            snipDsN_n1 = snipDsN;
             
         elseif nipNum == 2 % get common spiketimes for both NIPs
             allEvents_n2 = allEvents_curr;
@@ -382,8 +374,28 @@ for iCoder = 1:length(coderFiles)
             % matters.
             allEvents = allEvents_n1;
             dsAllSpikes = [allSpikes_n1; allSpikes_n2];
+            snipRawNAll = [snipRawN_n1; snipRawN];
+            snipFrNAll = [snipFrN_n1; snipFrN];
+            snipDsNAll = [snipDsN_n1; snipDsN];
         end
     end
+    
+    % example of one trial preprocessing all neurons
+    figure('color','w');
+    AxEx = arrayfun(@(i) subplot(1,3,i,'NextPlot', 'add', 'Box', 'off',  'TickDir', 'out', 'FontSize', 10, 'FontWeight', 'bold', ...
+        'xtick', '', 'xticklabel', ''), 1:3);
+    subplot(1,3,1), imagesc(snipRawNAll), title('raw'), colorbar
+    subplot(1,3,2), imagesc(snipFrNAll), title('FRs'), colorbar
+    subplot(1,3,3), imagesc(snipDsNAll), title('dsFRs'), colorbar
+    axis(AxEx, 'square')
+    axis(AxEx, 'tight')
+    colormap jet
+    set(gcf, 'units', 'normalized', 'outerposition', [0.05 0.1 1 0.9])
+    arrayfun(@(i) ylabel(AxEx(i), 'units'), 1:3)
+    arrayfun(@(i) xlabel(AxEx(i), 'samplepoints (trl 1)'), 1:3)
+    print('-dtiff', '-r400', [figDir, [monkey, sessionDate], '_pre_proc_example_single_neuron', paramStr])
+    close
+    
     
     
     % downsample relevant bits
@@ -423,8 +435,8 @@ for iCoder = 1:length(coderFiles)
         nUnitsArray(aa) = sum(inArray);
         arraySpikes = alignedBinnedSpikes(inArray,:,:);
         % convert to Hz by multiplying mean spikes/bin by (1 / binWidth) bins / sec
-        popTrlMean{1, aa} = squeeze(mean(arraySpikes, [1 2])) ./ binWidth;
-        trlMean{1, aa} = squeeze(mean(arraySpikes, 2)) ./ binWidth;
+        popTrlMean{1, aa} = squeeze(mean(arraySpikes, [1 2]));
+        trlMean{1, aa} = squeeze(mean(arraySpikes, 2));
     end
     
     popTrlMean = popTrlMean';
@@ -432,7 +444,8 @@ for iCoder = 1:length(coderFiles)
     
     %% set up figure (poptrlmean)
     
-    figTitleStr = ['[smooth=', num2str(doSmooth)', ' win=', num2str(binSteps), ' norm=' normMethod, ' binsteps=' num2str(binSteps), ']'];
+    figTitleStr = ['[smooth=', num2str(doSmooth)', ' win=', num2str(binSteps), ' binsteps=' num2str(binSteps), ']'];
+    
     if ismember(0, cen)
         eventXPos = find(cen==0);
     else
