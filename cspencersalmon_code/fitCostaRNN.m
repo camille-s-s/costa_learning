@@ -19,10 +19,10 @@ rng(42)
 %% data parameters
 dtData          = 0.020;                % time step (in s) of the training data
 dtFactor        = 20;                   % number of interpolation steps for RNN
-doSmooth        = true;
-doSoftNorm      = true;
+doSmooth        = false;
+doSoftNorm      = false;
 normByRegion    = false;                % normalize activity by region or globally
-rmvOutliers     = false;
+rmvOutliers     = true;
 
 %% RNN parameters
 g               = 1.5;                  % instability (chaos); g<1=damped, g>1=chaotic
@@ -86,8 +86,32 @@ else
 end
 
 if rmvOutliers
-    outliers = isoutlier(mean(targets, 2), 'percentiles', [1 99]);
+    figure('color','w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0.05 0.1 0.9 0.6])
+     AxD = arrayfun(@(i) subplot(1,2,i,'NextPlot', 'add', 'Box', 'on', ...
+         'TickDir','out', 'FontSize', 10, 'fontweight', 'bold'), 1:2);
+   
+    subplot(1, 2, 1), histogram(mean(targets, 2)), title('mean target FRs all units w/ outliers')
+    outliers = isoutlier(mean(targets, 2), 'percentiles', [0.5 99.5]);
     targets = targets(~outliers, :);
+    spikeInfo = spikeInfo(~outliers, :);
+    subplot(1, 2, 2), histogram(mean(targets, 2)), title(['mean target FRs all units minus ', num2str(sum(outliers)), ' outliers'])
+    
+    oldxlim = cell2mat(get(AxD, 'xlim'));
+    newxmin = min(oldxlim(:)); newxmax = max(oldxlim(:));
+    arrayfun(@(i) set(AxD(i), 'xlim', [newxmin newxmax]), 1:2)
+    tmpFigName = RNNname;
+    tmpFigName(strfind(tmpFigName, '_')) = ' ';
+    text(AxD(2), -0.3 * (newxmax - newxmin), 1.05 * max(get(AxD(2), 'ylim')), tmpFigName, 'fontweight','bold', 'fontsize', 13)
+    print('-dtiff', '-r400', [rnnFigDir, 'targets_outlier_comparison_', RNNname])
+    close
+    
+    % update indexing vectors
+    % arrayfun(@(iRgn) arrayRgns{iRgn, 3}((find(outliers))=[]), 3:size(arrayRgns,1), 'un', 0)
+    for iRgn = 1 : size(arrayRgns, 1)
+        arrayRgns{iRgn, 3}(outliers) = [];
+    end
+    
 end
 
 % housekeeping
