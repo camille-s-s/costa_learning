@@ -17,9 +17,10 @@ rng(42)
 % datadir         = '~/Dropbox (BrAINY Crew)/costa_learning/reformatted_data/';
 
 %% data parameters
-dtData          = 0.020;                % time step (in s) of the training data
+dtData          = 0.010;                % time step (in s) of the training data
 dtFactor        = 20;                   % number of interpolation steps for RNN
 doSmooth        = false;
+smoothWidth     = 0.15;                 % in seconds, width of gaussian kernel if doSmooth == true
 doSoftNorm      = false;
 normByRegion    = false;                % normalize activity by region or globally
 rmvOutliers     = true;
@@ -43,6 +44,7 @@ saveMdl         = true;
 
 %% output directories
 rnnDir          = '~/Dropbox (BrAINY Crew)/costa_learning/models/';
+rnnSubDir       = [rnnDir, RNNname(strfind(RNNname, '_') + 1 : end), filesep];
 rnnFigDir       = '~/Dropbox (BrAINY Crew)/costa_learning/models/figures/';
 
 %% RNN
@@ -50,6 +52,10 @@ rnnFigDir       = '~/Dropbox (BrAINY Crew)/costa_learning/models/figures/';
 % overwrite defaults based on inputs
 if exist('params','var')
     assignParams(who,params);
+end
+
+if ~isfolder(rnnSubDir)
+    mkdir(rnnSubDir)
 end
 
 % set up final params
@@ -62,7 +68,7 @@ nRunTot         = nRunTrain + nRunFree;   % idk according to CURBD
 targets = allSpikes;
 
 if doSmooth
-    targets = smoothdata(targets, 2, 'movmean', 0.1 / dtData); % convert smoothing kernel from msec to #bins);
+    targets = smoothdata(targets, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from msec to #bins);
 end
 
 % this will soft normalize a la Churchland papers
@@ -133,11 +139,9 @@ nUnits = size(targets, 1);
 nLearn = nUnits; % number of learning steps
 
 % if the RNN is bigger than training neurons, pick the ones to target (??)
-learnList = randperm(nUnits);
+learnList = 1 : nLearn;% randperm(nUnits);
 iTarget = learnList(1:nLearn);
 iNonTarget = learnList(nLearn:end);
-
-% T = T{1}; % kept both trlInfo but they are almost identical between NIPs
 
 % sanity check match in #trials
 assert(isequal(sum(allEvents == 1), height(T)))
@@ -145,18 +149,15 @@ nTrls = height(T);
 
 % pull trial starts
 fixOnInds = [find(allEvents == 1), size(targets, 2)];
-% outcomeInds = find(allEvents == 4);
 
 % get block/set structure (s sets of j trials each)
 firstTrlInd = find(T.trls_since_nov_stim == 0);
 lastTrlInd = find(T.trls_since_nov_stim  == 0) - 1;
-
 if lastTrlInd(1) ~= 0, keyboard, end
 if firstTrlInd(1) ~= 1, keyboard, end
 firstTrlInd(1) = [];
 lastTrlInd(1:2) = [];
 lastTrlInd = [lastTrlInd; height(T)]; % can't have a 0 ind
-
 nTrlsPerSet = T.trls_since_nov_stim(lastTrlInd) + 1; % 10 <= j <= 30 according to paper
 nSets = length(nTrlsPerSet); % s <= 32 according to paper
 setID = [0; repelem(1:nSets, nTrlsPerSet)'];
@@ -164,33 +165,30 @@ setID = [0; repelem(1:nSets, nTrlsPerSet)'];
 % initialize outputs
 stdData = zeros(1,nTrls);
 JTrls = NaN(nUnits, nUnits, nTrls);
-
-
-if trainFromPrev
-    prevMdls = dir([rnnDir, RNNname, '_set*_trial*.mat']);
+  
+try
+    prevMdls = dir([rnnSubDir, RNNname, '_set*_trial*.mat']);
     allTrialIDs = unique(arrayfun(@(i) ...
         str2double(prevMdls(i).name(strfind(prevMdls(i).name,'trial') + 5 : end - 4)), ...
         1 : length(prevMdls)));
-    startTrl = max(allTrialIDs);
-    
-    try
-        prevMdl = load(prevMdls(find(allTrialIDs == startTrl)).name);
-        prevJ = prevMdl.RNN.mdl.J;
-        clear prevMdl
-    catch
+    prevMdl = load([rnnSubDir prevMdls(allTrialIDs == max(allTrialIDs)).name]);
+    prevJ = prevMdl.RNN.mdl.J;
+    prevJ0 = prevMdl.RNN.mdl.J0;
+    if trainFromPrev
+        startTrl = prevMdl.RNN.mdl.iTrl + 1; % max(allTrialIDs) + 1;
+    else
         startTrl = 1;
     end
-else
+catch
     startTrl = 1;
 end
-
 
 
 for iTrl = startTrl : nTrls % - 1 or nSets - 1
 
     fprintf('\n')
     
-    disp(['Training trial # ', num2str(iTrl), '.'])
+    disp([RNNname, ': training trial # ', num2str(iTrl), '.'])
     
     iStart = fixOnInds(iTrl); % start of trial
     iStop = fixOnInds(iTrl + 1) - 1; % right before start of next trial
@@ -202,14 +200,35 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     % set up white noise inputs (from CURBD)
     iWN = ampWN * randn( nUnits, length(tRNN) );
     inputWN = ones(nUnits, length(tRNN));
-    for tt = 2: length(tRNN)
+    for tt = 2 : length(tRNN)
         inputWN(:, tt) = iWN(:, tt) + (inputWN(:, tt - 1) - iWN(:, tt)) * exp( -(dtRNN / tauWN) );
     end
     
     inputWN = ampInWN * inputWN;
     
+    % sidebar to save inputWN separately in the hopes of making loading
+    % RNNs faster
+    if ~isfolder([rnnSubDir, 'WN/'])
+        mkdir([rnnSubDir, 'WN/'])
+    end
+    inputWNDataFnm = [rnnSubDir, 'WN/', RNNname, '_inputWN_trl', num2str(iTrl), '.mat'];
+    % if exist(inputWNData, 'file') && iTrl ~= 1
+        % load(inputWNData);
+    % elseif ~exist(inputWNData, 'file') && iTrl == 1
+        % inputWNAllTrl = cell(nTrls, 2);
+        % inputWNAllTrl(:, 1) = num2cell(1 : nTrls);
+    % else
+        % disp('WN saving mistake perhaps')
+        % keyboard
+    % end
+    % inputWNAllTrl{iTrl, 2} = inputWN;
+    
+    if saveMdl
+        save(inputWNDataFnm, 'inputWN', '-v7.3')
+    end
+        
     % initialize DI matrix J
-    if trainFromPrev && exist('prevJ', 'var')
+    if trainFromPrev && iTrl == startTrl && exist('prevJ', 'var')
         J = prevJ;
     else
         if iTrl == 1
@@ -219,7 +238,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         end
     end
     
-    J0 = J;
+    J0 = J; % TO DO: ADD CHECK THAT J0(t) = J(t-1) aka prevJ
     
     % get standard deviation of entire data that we are looking at
     stdData(iTrl)  = std(reshape(currTargets(iTarget,:), length(iTarget)*length(tData), 1));
@@ -243,9 +262,10 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         f = figure('Position',[100 100 1800 600]);
     end
     
-    tic
+    % tic
     
     %% training
+    
     % loop through training runs
     for nRun = 1 : nRunTot
         % set initial condition to match target data
@@ -326,51 +346,70 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
             hold all;
             plot(tRNN,R(iTarget(idx),:), 'linewidth', 1.5);
             plot(tData,currTargets(iTarget(idx),:), 'linewidth', 1.5);
-            axis tight; set(gca, 'ylim', [-0.1 1])
-            ylabel('activity');
-            xlabel('time (s)'),
-            legend('model','real','location','eastoutside')
+            axis tight; set(gca, 'ylim', [-0.1 1], 'Box','off','TickDir', 'out', 'FontSize', 14)
+            ylabel('activity'); xlabel('time (s)'),
+            legend('model', 'real', 'location', 'eastoutside')
             title(['run ', num2str(nRun)])
-            set(gca,'Box','off','TickDir','out','FontSize',14);
             
             subplot(2,4,5);
             hold on;
-            plot(pVars(1:nRun));
-            ylabel('pVar');
-            set(gca,'Box','off','TickDir','out','FontSize',14);
+            plot(pVars(1:nRun)); ylabel('pVar');
+            set(gca, 'ylim', [-0.1 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 14);
+            title(['current pVar=', num2str(pVars(nRun), '%.3f')])
             
             subplot(2,4,6);
             hold on;
-            plot(chi2(1:nRun))
-            ylabel('chi2');
-            set(gca,'Box','off','TickDir','out','FontSize',14);
+            plot(chi2(1:nRun)); ylabel('chi2');
+            set(gca, 'ylim', [-0.1 1], 'Box','off','TickDir', 'out', 'FontSize', 14);
+            title(['current chi2=', num2str(chi2(nRun), '%.3f')])
             drawnow;
         end
         
-        if nRun == 1
-            fprintf(num2str(nRun))
-        elseif mod(nRun, 100) == 0
-            fprintf('\n')
-            fprintf(num2str(nRun))
-        else
-            fprintf('.')
-        end
+%         if nRun == 1
+%             fprintf(num2str(nRun))
+%         elseif mod(nRun, 100) == 0
+%             fprintf('\n')
+%             fprintf(num2str(nRun))
+%         else
+%             fprintf('.')
+%         end
         
     end
     
     % save J for next link
-   JTrls(:, :, iTrl) = J;
+    JTrls(:, :, iTrl) = J;
+    
+    % sidebar to save J separately in the hopes of making loading
+    % RNNs faster (and crossreferencing
+    JTensor = [rnnSubDir, RNNname, '_JTrl.mat'];
+    
+    if exist(JTensor, 'file') && iTrl ~= 1
+        load(JTensor);
+    elseif ~exist(JTensor, 'file') && iTrl == 1
+        JAllTrl = JTrls;
+    else
+        disp('Jsaving mistake perhaps')
+        keyboard
+    end
+    
+    JAllTrl(:, :, iTrl) = J;
+    if saveMdl
+        save(JTensor, 'JAllTrl', '-v7.3') % will cross reference with extracted from makeRNNPlots
+    end
+    clear JAllTrl
     
     % package up and save outputs at the end of training for each link
     RNN = struct;
-   
+    
     if setID(iTrl) == 0
         rnnParams = struct( ...
             'iTrl',                 iTrl, ...
             'doSmooth',             doSmooth, ...
+            'smoothWidth',          smoothWidth, ...
             'doSoftNorm',           doSoftNorm, ...
             'normByRegion',         normByRegion, ...
             'rmvOutliers',          rmvOutliers, ...
+            'outliers',             outliers, ...
             'dtFactor',             dtFactor, ...
             'g',                    g, ...
             'alpha',                alpha, ...
@@ -406,28 +445,19 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         'chi2',                 chi2, ...
         'pVars',                pVars, ...
         'stdData',              stdData(iTrl), ...
-        'inputWN',              inputWN, ...
+        'inputWN',              [], ...
         'iTarget',              iTarget, ...
         'iNonTarget',           iNonTarget, ...
         'params',               rnnParams );
     
     if saveMdl
-        save([rnnDir, RNNname, '_set', num2str(setID(iTrl)), '_trial', num2str(iTrl), '.mat'],'RNN', '-v7.3')
+        save([rnnSubDir, RNNname, '_set', num2str(setID(iTrl)), '_trial', num2str(iTrl), '.mat'],'RNN', '-v7.3')
     end
     
     clear RNN
-    toc
+    % toc
     
 end
-
-%% package up outputs
-
-%
-% RMdlSampleTrls = RMdlSampleTrls(1:iTrl, 1);
-% chi2Trls = chi2Trls(1:iTrl,:);
-% pVarsTrls = pVarsTrls(1:iTrl,:);
-
-
 
 end
 
