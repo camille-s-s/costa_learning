@@ -24,11 +24,11 @@ spikeInfoPath   = [bd 'reformatted_data/'];
 
 %%
 addpath(genpath(bd))
-cd(mdlDir)
-mdlFiles = dir('rnn_*_set*_trial*.mat');
+cd(spikeInfoPath)
 
-allFiles = unique(arrayfun(@(i) ...
-    mdlFiles(i).name(strfind(mdlFiles(i).name, 'rnn') + 4 : strfind(mdlFiles(i).name, 'set') - 2), 1:length(mdlFiles), 'un', false));
+allFiles = dir('*_meta.mat');
+bad_files = arrayfun(@(iFile) any(strfind(allFiles(iFile).name, '._')), 1:length(allFiles));
+allFiles(bad_files) = [];
 
 desiredOrder = {'left_cdLPFC', 'right_cdLPFC', ...
     'left_mdLPFC', 'right_mdLPFC', ...
@@ -40,12 +40,17 @@ if setToPlot < 2
     keyboard
 end
 
-% TO DO: TEST ON ALL OTHER SESSIONS
-% TO DO: FIGURE OUT HOW TO MAKE MODEL OUTPUTS SMALLER - WHAT DO WE REALLY
-% NEED? SAVE FULL ONES ELSEWHERE
-for f = 2 : length(allFiles) % for each session....
+for iFile = 1 : length(allFiles) % for each session....
     
-    currSsn = dir(['rnn_', allFiles{f}, '_*.mat']);
+    fName = allFiles(iFile).name;
+    fID = fName(1:strfind(fName, '_') - 1);
+    monkey = fID(1);
+    ssnDate = fID(2:end);
+    
+    cd([mdlDir, monkey, ssnDate, filesep])
+    currSsn = dir('rnn_*_set*_trial*.mat');
+    
+    % currSsn = dir(['rnn_', allFiles{iFile}, '_*.mat']);
     
     allSetIDs = unique(arrayfun(@(i) ...
         str2double(currSsn(i).name(strfind(currSsn(i).name,'set') + 3 : strfind(currSsn(i).name,'trial') - 2)), 1:length(currSsn)));
@@ -57,24 +62,40 @@ for f = 2 : length(allFiles) % for each session....
     
     % for first trial of a session, pull params (this field is empty for
     % all other trials in a session)
-    firstTrl = find(arrayfun(@(i) isequal(currSsn(i).name, ['rnn_', allFiles{f}, '_set0_trial1.mat']), 1 : nTrls));
+    firstTrl = find(arrayfun(@(i) isequal(currSsn(i).name, ['rnn_', monkey, ssnDate, '_set0_trial1.mat']), 1 : nTrls));
     spikeInfoName = [currSsn(firstTrl).name(5 : median(strfind(currSsn(firstTrl).name, '_'))-1), '_meta.mat'];
     load([spikeInfoPath, spikeInfoName], 'spikeInfo', 'trlInfo', 'dsAllEvents')
-    load([mdlDir, currSsn(firstTrl).name]);
+    load([mdlDir, monkey, ssnDate, filesep, currSsn(firstTrl).name]);
     binSize = RNN.mdl.dtData; % in sec
     tDataInit = RNN.mdl.tData;
     tRNNInit = RNN.mdl.tRNN;
     
+    
+    assert(RNN.mdl.params.doSmooth == 1 & ...
+        RNN.mdl.params.doSoftNorm == 1 & ....
+        RNN.mdl.params.normByRegion == 0 & ...
+        RNN.mdl.params.rmvOutliers == 1 & ...
+        RNN.mdl.params.dtFactor == 20 & ...
+        RNN.mdl.params.g == 1.5 & ...
+        RNN.mdl.params.tauRNN == 0.001 & ...
+        RNN.mdl.params.tauWN == 0.1 & ...
+        RNN.mdl.params.ampInWN == 0.001 & ...
+        RNN.mdl.params.nRunTot == 1515)
+    
+    if isfield(RNN.mdl.params, 'smoothWidth')
+        assert(RNN.mdl.params.smoothWidth == 0.15)
+    end
+    
     % load full targets that went into fitCostaRNN for sanity checking with
     % targets from each trial's model
-    metafnm = [spikeInfoPath, allFiles{f}, '_spikesCont'];
+    metafnm = [spikeInfoPath, monkey, ssnDate, '_spikesCont'];
     S = load(metafnm);
     targets = S.dsAllSpikes;
     
     %% recreate target prep from fitCostaRNN for comparison of targets from each trial
     
     if RNN.mdl.params.doSmooth
-        targets = smoothdata(targets, 2, 'movmean', 0.1 / RNN.mdl.dtData); % convert smoothing kernel from msec to #bins);
+        targets = smoothdata(targets, 2, 'gaussian', 0.15 / RNN.mdl.dtData); % convert smoothing kernel from msec to #bins);
     end
     
     % this will soft normalize a la Churchland papers
@@ -115,7 +136,6 @@ for f = 2 : length(allFiles) % for each session....
                 arrayRgns{iRgn, 3}(outliers) = [];
             end
         end
-        
     end
     
     % housekeeping
@@ -149,13 +169,13 @@ for f = 2 : length(allFiles) % for each session....
     for i = 1 : nTrls
         
         % TO DO: check that all dtRNN are the same
-        % TO DO: CHECK REORDERING BY ITARGET
-        
-        % mdlfnm = [mdlDir, currSsn(i).name];
-        mdlfnm = dir([mdlDir, 'rnn_', allFiles{f}, '_set*_trial', num2str(i), '.mat']);
+        mdlfnm = dir([mdlDir, monkey, ssnDate, filesep, 'rnn_', monkey, ssnDate, '_set*_trial', num2str(i), '.mat']);
         tmp = load(mdlfnm.name);
-        
         mdl             = tmp.RNN.mdl;
+        
+        assert(mdl.dtRNN == 0.0005 & ...
+            mdl. dtData == 0.01)
+        
         iTarget         = mdl.iTarget;
         
         % turn a scrambly boy back into its OG order - target_unit_order(iTarget) = R_and_J_unit_order
@@ -192,33 +212,21 @@ for f = 2 : length(allFiles) % for each session....
         J0_U(:, :, i)   = mdl.J0(unscramble, unscramble);
         R_U{i}          = mdl.RMdlSample(unscramble, :); % since targets(iTarget) == R
         % figure, scatter(mean(mdl.targets, 2), mean(mdl.RMdlSample(X, :), 2)), xlabel('targets unscambled'), ylabel('R unscrambled')
-        
-        % clean up.mdl
-        if isfield(mdl, 'tData')  && isfield(mdl, 'tRNN') && ~isequal(currSsn(i).name(end - 14 : end - 4), 'set0_trial1')
-            mdl = rmfield(mdl, 'tData');
-            mdl = rmfield(mdl, 'tRNN');
-            RNN.mdl = mdl;
-            save([mdlDir, mdlfnm.name], 'RNN')
-        end
-        
+
     end
     toc
     
+    % TO DO: ADD COMPARISON OF JTENSOR WITH EXTRACTED J, ALSO ASSERT THAT
+    % ALL J0s ARE DIFFERENT
+    % isequal(J0_U(:, :, 2), J_U(:, :, 1))
+    JTensor = [mdlDir, monkey, ssnDate, filesep, 'rnn_', monkey, ssnDate, '_JTrl.mat'];
+    if exist(JTensor, 'file')
+        load(JTensor)
+        assert(isequal(J_S, JAllTrl(:, :, 1 : nTrls)))
+    end
+    
     %% HOUSEKEEPING: SPATIAL
     
-    % Ds = cell2mat(D_S');
-    % Du = cell2mat(D_U');
-    % figure, scatter(mean(Ds, 2), mean(cell2mat(R_dsU'), 2)) % shows these are correlated
-    
-    % find a way to turn Du into Ds order by minimizing sum of squared errors
-    % between rows
-    % uMatchs = arrayfun(@(n) ...
-    %find(sum((Du - Ds(n, :)).^2, 2) == min(sum((Du - Ds(n, :)).^2, 2)), 1), 1 : size(Du, 1));
-    % assert(isequaln(Du(uMatchs, :), Ds))
-    % assert(sum([mean(Du(uMatchs, :), 2) -  mean(Ds, 2)]) < 1^-10)
-    
-    % TO DO: compare mean spike rates by region from spikeCount....or from their
-    % figures on published data?
     % make regions more legible
     rgnOrder = arrayfun(@(iRgn) find(strcmp(rgns(:,1), desiredOrder{iRgn})), 1 : nRegions); % ensure same order across sessions
     rgns(:, 1) = arrayfun(@(iRgn) strrep(rgns{iRgn, 1}, 'left_', 'L'), 1 : nRegions, 'un', false)';
@@ -259,7 +267,7 @@ for f = 2 : length(allFiles) % for each session....
     trlDursRNN = arrayfun(@(iTrl) size(D_U{iTrl}, 2), 1 : nTrls)';
     [~, ia, ic] = unique(setID(setID ~= 0)');
     trlsPerSetRNN = accumarray(ic, 1);
-    minTrlsPerSet = min(trlsPerSetRNN(2 : end));
+    minTrlsPerSet = min(trlsPerSetRNN(:));
     DFull = cell2mat(D_U');
     
     % sanity check #1: make sure we are where we think we are in trlInfo
@@ -270,9 +278,14 @@ for f = 2 : length(allFiles) % for each session....
     tmpLast = [find(trl == 0) - 1; height(trlInfo)];
     tmpLast(tmpLast == 0) = []; % delete first  trial
     trlsPerSetTbl = trl(tmpLast) + 1;
-    n = numel(trlsPerSetRNN(2 : end));
-    matchIx = find(arrayfun(@(i) isequal(trlsPerSetRNN(2 : end), trlsPerSetTbl(i : i + n - 1)), ...
+    n = numel(trlsPerSetRNN);
+    matchIx = find(arrayfun(@(i) isequal(trlsPerSetRNN(1 : end), trlsPerSetTbl(i : i + n - 1)), ...
         1 : numel(trlsPerSetTbl) - n)); % TO DO NEXT: USE THIS IN LATER PLOTTING!
+    
+    if isempty(matchIx)
+        disp('might have incomplete set or not enough trials...')
+        keyboard
+    end
     
     % sanity check #2: compare targets (FULL TARGETS, TRIALS CONCATENATED
     % END TO END) with the snippets from each model .mat file
@@ -285,8 +298,11 @@ for f = 2 : length(allFiles) % for each session....
     trlDursTbl = round(diff(round(trlInfo.event_times(:, 1), 3, 'decimals')) / dtData);
     [all_C, all_lags] = xcorr(trlDursRNN - mean(trlDursRNN), trlDursTbl - mean(trlDursTbl), 100);
     best_lag = all_lags(all_C==abs(max(all_C)));
-    assert(best_lag == 0) % trial durations between trlInfo table and trlDurs from RNN snippets should match
-    
+    try
+        assert(best_lag == 0) % trial durations between trlInfo table and trlDurs from RNN snippets should match
+    catch
+        keyboard
+    end
     % for demarcating new trials in later plotting
     nSPFull = size(DFull,2);
     nSPTmp = cell2mat(cellfun(@size, D_U, 'un', 0));
@@ -303,7 +319,6 @@ for f = 2 : length(allFiles) % for each session....
     DTrunc = arrayfun(@(iTrl) DTrunc{iTrl}(:, 1 : shortestTrl), 1 : nD + 1, 'un', false)';
     DTrunc = cell2mat(DTrunc');
     DMean = cell2mat(arrayfun(@(n) mean(reshape(DTrunc(n, :), shortestTrl, size(DTrunc, 2)/shortestTrl), 2)', 1 : size(DTrunc, 1), 'un', false)');
-    
     
     %% reorder J by region order (for J plotting of full matrix)
     
@@ -334,6 +349,9 @@ for f = 2 : length(allFiles) % for each session....
     
     %% pVar / chi2 for first and last J
     
+    if ~isfolder([RNNfigdir, 'convergence', filesep])
+        mkdir([RNNfigdir, 'convergence', filesep])
+    end
     idx = randi(size(intraRgnJ, 1));
     figure('color', 'w')
     set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.15 0.8 0.7])
@@ -363,14 +381,14 @@ for f = 2 : length(allFiles) % for each session....
     subplot(2,4,5);
     hold on;
     plot(firstPVars(1:nRun), 'k', 'linewidth', 1.5);
-    ylabel('pVar');
+    ylabel('pVar');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final pVar=', num2str(firstPVars(end), '%.3f')])
     set(gca,'Box','off','TickDir','out','FontSize',14);
     subplot(2,4,6);
     hold on;
     plot(firstChi2(1:nRun), 'k', 'linewidth', 1.5)
-    ylabel('chi2');
+    ylabel('chi2');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(firstChi2(end), '%.3f')])
     set(gca,'Box','off','TickDir','out','FontSize',14);
-    print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_firstTrlConvergence'])
+    print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'])
     close
     
     % last
@@ -402,14 +420,14 @@ for f = 2 : length(allFiles) % for each session....
     subplot(2,4,5);
     hold on;
     plot(lastPVars(1:nRun), 'k', 'linewidth', 1.5);
-    ylabel('pVar');
+    ylabel('pVar');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final pVar=', num2str(lastPVars(end), '%.3f')])
     set(gca,'Box','off','TickDir','out','FontSize',14);
     subplot(2,4,6);
     hold on;
     plot(lastChi2(1:nRun), 'k', 'linewidth', 1.5)
-    ylabel('chi2');
+    ylabel('chi2'); xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(lastChi2(end), '%.3f')])
     set(gca,'Box','off','TickDir','out','FontSize',14);
-    print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_lastTrlConvergence'])
+    print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_lastTrlConvergence'])
     close
     
     %% example graph (WIP)
@@ -468,16 +486,28 @@ for f = 2 : length(allFiles) % for each session....
     [w, scores, eigen, ~, pvar, mu] = pca(trlsAvg', 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
     
     % estimate effective dimensionality
+    
+    if ~isfolder([RNNfigdir, 'effDimAllActivity', filesep])
+        mkdir([RNNfigdir, 'effDimAllActivity', filesep])
+    end
+    
     figure('color', 'w'), plot(1 : length(eigen), cumsum(pvar), 'linewidth', 1.5, 'color', 'b')
-    set(gca, 'fontweight', 'bold', 'fontsize', 13),
+    set(gca, 'fontweight', 'bold', 'fontsize', 13, 'ylim', [0 110]),
     grid minor, xlabel('# PCs'), ylabel('% variance explained')
     nPC_cutoff = find(cumsum(pvar) >= 99,1, 'first');
     line(gca, [nPC_cutoff nPC_cutoff], get(gca, 'ylim'), 'linestyle', '--', 'linewidth', 1.5, 'color', 'k')
-    title(gca, [allFiles{f}, ': eff dim (99% var exp) for avg activity'], 'fontsize', 14, 'fontweight', 'bold')
-    print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_effDimAllActivity'])
+    text(gca, round(1.2 * nPC_cutoff), 10, ['#PCs = ', num2str(nPC_cutoff)], 'fontweight', 'bold')
+    
+    title(gca, [monkey, ssnDate, ': eff dim (99% var exp) for avg activity (#', num2str(nTrls - sum(bad_trls)), ' trls)'], 'fontsize', 14, 'fontweight', 'bold')
+    print('-dtiff', '-r400', [RNNfigdir, 'effDimAllActivity', filesep, monkey, ssnDate, '_effDimAllActivity'])
     close
     
     % project data into low D space
+    
+    if ~isfolder([RNNfigdir, 'topPCsAllActivity', filesep])
+        mkdir([RNNfigdir, 'topPCsAllActivity', filesep])
+    end
+    
     figure('color', 'w'); hold on
     set(gcf, 'units', 'normalized', 'outerposition', [0.25 0.1 0.5 0.8])
     cm = colormap(cool);
@@ -506,8 +536,8 @@ for f = 2 : length(allFiles) % for each session....
     xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
     grid minor
     view(3)
-    title(gca, [allFiles{f}, ': avg activity from first # ', num2str(nTrls - sum(bad_trls)), ' trls projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
-    print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_topPCsAllActivity'])
+    title(gca, [monkey, ssnDate, ': avg activity from first # ', num2str(nTrls - sum(bad_trls)), ' trls projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
+    print('-dtiff', '-r400', [RNNfigdir, 'topPCsAllActivity', filesep, monkey, ssnDate, '_topPCsAllActivity'])
     close
     
     %% set up for future J plots reordered so within-rgn is on-diagonal and between-rgn is off-diagonal
@@ -525,6 +555,7 @@ for f = 2 : length(allFiles) % for each session....
     % for plotting consecutive trials (last trial prev set is first - to
     % compare delta between sets) as well as delta within set
     tmpInds = find(trlInfo.trls_since_nov_stim == 0);
+    
     while trlInfo.nov_stim_rwd_prob(tmpInds(setToPlot - 1)) == 999
         setToPlot = setToPlot + 1; % move down sets until the last one of prev trial is 999 (get it at most novel part of session
     end
@@ -534,6 +565,10 @@ for f = 2 : length(allFiles) % for each session....
     subT = trlInfo(trlsToPlot, :); % to cross reference and make sure you're pulling Js from the trials you want
     assert(sum(subT.trls_since_nov_stim == 0) == 1) % should only be one instance of novel stim appearing
     cm = brewermap(100, '*RdBu');
+    
+    if ~isfolder([RNNfigdir, 'intraRgnDeltaJs_consecutive', filesep])
+        mkdir([RNNfigdir, 'intraRgnDeltaJs_consecutive', filesep])
+    end
     
     figT = figure('color','w');
     AxT = arrayfun(@(i) subplot(sum(rgnIxToPlot), nD, i, 'NextPlot', 'add', 'Box', 'on', 'BoxStyle', 'full', 'linewidth', 1, ...
@@ -558,7 +593,6 @@ for f = 2 : length(allFiles) % for each session....
         
         % try to sort on descending max mean value (presyn) based
         % on last delta
-        % deltaToSort = squeeze(dJ(:, :, end));
         deltaToSort = squeeze(dJ(:, :, 1)); % maybe more interesting since this is where the nov stim appears
         
         [~, preSynSort] = sort(mean(deltaToSort, 1), 'descend');
@@ -570,19 +604,14 @@ for f = 2 : length(allFiles) % for each session....
         
         % test for unreshaping
         dJUnresh = reshape(dJResh(1, :), [nUnitsRgn, nUnitsRgn]);
-        isequal(squeeze(dJ(:, :, 1)), dJUnresh)
-        
+        assert(isequal(squeeze(dJ(:, :, 1)), dJUnresh))
         
         for i = 1 : nD
-            
-            % J_prev = squeeze(intraRgnJ(in_rgn, in_rgn, trlsToPlot(i))); % trained J from first trial of current set
-            % J_curr = squeeze(intraRgnJ(in_rgn, in_rgn, trlsToPlot(i) + 1)); % trained J from second trial of current set
             
             J_delta = squeeze(dJ(:, :, i)); % J_curr - J_prev;
             
             % rearrange to try to find potential structure in terms of
             % changes
-            % J_delta = J_delta(preSynSort, preSynSort);
             J_delta = J_delta(postSynSort, postSynSort); % makes sense to look at this since that's what gets changed....
             
             dJ_consecutive = [dJ_consecutive; J_delta(:)];
@@ -628,20 +657,18 @@ for f = 2 : length(allFiles) % for each session....
     end
     
     % update clims for the last three
-    [~, L, U, C] = isoutlier(dJ_consecutive, 'percentile', [0.5 99.5]);
+    [~, L, U] = isoutlier(dJ_consecutive, 'percentile', [0.5 99.5]);
     % newCLims =  [-0.45 0.45];
     
-    % newCLims = [-1 * max(abs([L, U])), max(abs([L, U]))];
     newCLims = [-1 * round(max(abs([L, U])), 3, 'decimals'), round(max(abs([L, U])), 3, 'decimals')];
     set(AxT, 'clim', newCLims),
     titleAxNum = round(0.5*(nD));
     text(AxT(titleAxNum ), -95, -15, ...
-        [allFiles{f},': consecutive within-set \DeltaJs --- ([0.5 99.5] %ile shown (range=\Delta +/-', num2str(newCLims(2), '%.2f'), ') --- SORTED ON: 1st \Delta (postsyn)'], 'fontweight', 'bold', 'fontsize', 14)
+        [monkey, ssnDate,': consecutive within-set \DeltaJs --- ([0.5 99.5] %ile shown (range=\Delta +/-', num2str(newCLims(2), '%.2f'), ') --- SORTED ON: 1st \Delta (postsyn)'], 'fontweight', 'bold', 'fontsize', 14)
     
     set(figT, 'currentaxes', AxT),
-    print(figT, '-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_intraRgnDeltaJs_consecutiveTrls']),
+    print(figT, '-dtiff', '-r400', [RNNfigdir, 'intraRgnDeltaJs_consecutive', filesep, monkey, ssnDate, '_intraRgnDeltaJs_consecutive']),
     close(figT)
-    
     
     %% PCA on delta for consecutive trials, intraregionally
     
@@ -651,330 +678,216 @@ for f = 2 : length(allFiles) % for each session....
     end
     
     trlsToPlot = tmpInds(setToPlot - 1) - 1 : nTrls; % for this one do as many as you have!
+    tmpJ = intraRgnJ(:, :, trlsToPlot);
     
-    subT = trlInfo(trlsToPlot, :); % to cross reference and make sure you're pulling Js from the trials you want
-
-    dJ_consecutive = [];
-    colormap(cm)
+    % using all included Js for a given intraregional matrix, remove the
+    % middle five percent (threshold it)
+    [~, upperJ_cutoff, lowerJ_cutoff, C] = isoutlier(tmpJ(tmpJ~=0), 'percentile', [47.5 52.5]);
     
-    for iRgn = 1 % find(~badRgn)
-
+    figE = figure('color','w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0.1 0 0.8 1])
+    AxE = arrayfun(@(i) subplot(nRegions/2, 2, i, 'NextPlot', 'add', 'fontweight', 'bold', 'fontsize', 12, ...
+        'linewidth', 1.5, 'ylim', [0 110]), 1 : nRegions - sum(badRgn));
+    
+    figP = figure('color', 'w'); hold on
+    set(gcf, 'units', 'normalized', 'outerposition', [0.1 0 0.8 1])
+    AxP = arrayfun(@(i) subplot(nRegions/2, 2, i, 'NextPlot', 'add', 'fontweight', 'bold', 'fontsize', 12, ...
+        'linewidth', 1.5), 1 : nRegions - sum(badRgn));
+    
+    count = 1;
+    
+    subJReshAll = [];
+    wRgns = cell(numel(find(~badRgn)), 1);
+    pjnRgns = cell(numel(find(~badRgn)), 1);
+    
+    for iRgn = find(~badRgn)
+        
         in_rgn = newRgnInds(iRgn) + 1 : newRgnInds(iRgn + 1);
+        
         nUnitsRgn = numel(in_rgn);
         assert(isequal(nUnitsRgn, nUnitsAll(iRgn)))
         
         % get difference matrix (changes in intraregional J) for desired trials
         dJ = diff(intraRgnJ(in_rgn, in_rgn, trlsToPlot), 1, 3);
+        subJ = intraRgnJ(in_rgn, in_rgn, trlsToPlot);
         
         % reshape for PCA
         dJResh = cell2mat(arrayfun(@(iTrl) ...
             reshape(squeeze(dJ(:, :, iTrl)), 1, nUnitsRgn^2), 1 : size(dJ, 3), 'un', false)');
+        subJResh = cell2mat(arrayfun(@(iTrl) ...
+            reshape(squeeze(subJ(:, :, iTrl)), 1, nUnitsRgn^2), 1 : size(subJ, 3), 'un', false)');
         
+        subJReshAll = [subJReshAll, subJResh];
         % test for unreshaping
         dJUnresh = reshape(dJResh(1, :), [nUnitsRgn, nUnitsRgn]);
         assert(isequal(squeeze(dJ(:, :, 1)), dJUnresh))
+        assert(isequal(squeeze(subJ(:, :, 1)), reshape(subJResh(1, :), [nUnitsRgn, nUnitsRgn])))
+        
+        % threshold - place NaNs for J vals within cutoff
+        % subJResh(:, rmElements) = NaN;
         
         % coeffs from all elements of J for each delta
-        [w, scores, eigen, ~, pvar, mu] = pca(dJResh, 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
+        % [w, scores, eigen, ~, pvar, mu] = pca(dJResh, 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
+        [w, scores, eigen, ~, pvar, mu] = pca(subJResh, 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
+        
+        wRgns{iRgn} = w;
+        
+        % project each regional subspace onto all data
+        % pjnRgns{iRgn} = (subJResh - repmat(mu,size(subJResh,1),1)) * w;
+        pjnRgns{iRgn} = subJResh * w;
         
         % estimate effective dimensionality
-        figure('color', 'w'), plot(1 : length(eigen), cumsum(pvar), 'linewidth', 1.5, 'color', 'b')
-        set(gca, 'fontweight', 'bold', 'fontsize', 13),
-        grid minor, xlabel('# PCs'), ylabel('% variance explained')
+        set(0, 'currentfigure', figE);
+        subplot(AxE(count)), plot(1 : length(eigen), cumsum(pvar), 'linewidth', 1.5, 'color', 'b')
+        grid minor, xlabel('# PCs (5% of actual total)'), ylabel('% var explained')
+        xlim(AxE(count), [0 0.05 * round(size(subJResh, 2))])
         nPC_cutoff = find(cumsum(pvar) >= 99,1, 'first');
         line(gca, [nPC_cutoff nPC_cutoff], get(gca, 'ylim'), 'linestyle', '--', 'linewidth', 1.5, 'color', 'k')
         text(gca, round(1.2 * nPC_cutoff), 10, ['#PCs = ', num2str(nPC_cutoff)], 'fontweight', 'bold')
-        title(gca, [allFiles{f}, ': eff dim (99% var exp) for consecutive \Delta Js (#=', num2str(size(dJ, 3)), ')'], 'fontsize', 14, 'fontweight', 'bold')
-        print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_effDimIntraRgnDeltaJs_consecutive'])
-        close
-        
-        % project data into low D space
-        figure('color', 'w'); hold on
-        set(gcf, 'units', 'normalized', 'outerposition', [0.25 0.1 0.5 0.8])
-        cm = colormap(cool);
-        colormap(cm)
+        title(AxE(count), rgnLabels{iRgn})
         
         % project delta Js back into low D space (is this valid since
         % like...it's not time?)
-        projData = dJResh;
+        % projData = dJResh;
+        projData = subJResh;
         tempProj = (projData - repmat(mu,size(projData,1),1)) * w;
         x = tempProj;
-        plot3(x(:, 1), x(:, 2), x(:, 3), 'color', 'k', 'linewidth', 1.5)
-        plot3(x(10 : 10 : end - 10, 1), x(10 : 10 : end - 10, 2), x(10 : 10 : end - 10, 3), 'linestyle', 'none', 'marker', 'o', 'markersize', 8, 'markeredgecolor', 'k', 'markerfacecolor', 'w')
-        
-        set(gca, 'fontweight', 'bold', 'fontsize', 13)
+        set(0, 'currentfigure', figP);
+        subplot(AxP(count)),
+        plot3(x(:, 1), x(:, 2), x(:, 3), 'color', rgnColors(iRgn, :), 'linewidth', 1.5)
+        plot3(x(10 : 10 : end - 10, 1), x(10 : 10 : end - 10, 2), x(10 : 10 : end - 10, 3), 'linestyle', 'none', 'marker', 'o', 'markersize', 7, 'markeredgecolor', 'k', 'markerfacecolor', 'k')
+        plot3(x(1, 1), x(1, 2), x(1, 3), 'linestyle', 'none', 'marker', 'd', 'markersize', 10, 'markeredgecolor', 'k', 'markerfacecolor', 'g')
+        plot3(x(end, 1), x(end, 2), x(end, 3), 'linestyle', 'none', 'marker', 's', 'markersize', 10, 'markeredgecolor', 'k', 'markerfacecolor', 'r')
+        title(AxP(count), rgnLabels{iRgn})
         xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
         grid minor
         view(3)
-        title(gca, [allFiles{f}, ': consecutive \Delta Js (#=', num2str(size(dJ, 3)), ') projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
-        print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_topPCsIntraRgnDeltaJs_consecutive'])
-        close
         
+        count = count + 1;
     end
     
-    %% average target activity by region
+    % Effective dimensionality
+    if ~isfolder([RNNfigdir, 'effDimIntraRgnJs_consecutive', filesep])
+        mkdir([RNNfigdir, 'effDimIntraRgnJs_consecutive', filesep])
+    end
+    
+    xL = max(max(abs(cell2mat(get(AxP, 'xlim')))));
+    yL = max(max(abs(cell2mat(get(AxP, 'ylim')))));
+    zL = max(max(abs(cell2mat(get(AxP, 'zlim')))));
+    
+    set(AxP, 'xlim', [-xL xL], 'ylim', [-yL yL], 'zlim', [-zL zL])
+    
+    set(0, 'currentfigure', figE);
+    text(AxE(1), 0.75 * max(get(AxE(1), 'xlim')), 130, [monkey, ssnDate, ': eff dim (99% var exp) for consecutive Js (#trials=', num2str(size(subJ, 3)), ')'], 'fontsize', 14, 'fontweight', 'bold')
+    
+    % print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_effDimIntraRgnDeltaJs_consecutive'])
+    print('-dtiff', '-r400', [RNNfigdir, 'effDimIntraRgnJs_consecutive', filesep, monkey, ssnDate, '_effDimIntraRgnJs_consecutive'])
+    
+    % Low D projection
+    if ~isfolder([RNNfigdir, 'topPCsIntraRgnJs_consecutive', filesep])
+        mkdir([RNNfigdir, 'topPCsIntraRgnJs_consecutive', filesep])
+    end
+    
+    set(0, 'currentfigure', figP);
+    text(AxP(1), 3.5 * max(get(AxP(1), 'xlim')), 3.5 * max(get(AxP(1), 'ylim')), [monkey, ssnDate, ': consecutive Js (#trials=', num2str(size(subJ, 3)), ') projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
+    
+    % print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_topPCsIntraRgnDeltaJs_consecutive'])
+    print('-dtiff', '-r400', [RNNfigdir, 'topPCsIntraRgnJs_consecutive', filesep, monkey, ssnDate, '_topPCsIntraRgnJs_consecutive'])
+    
+    close all
+    
+    % same as above but all in one axes and without centering
+    % plot all PCs from all pic subspace
+    figure('color','w'); hold on,
+    set(gcf, 'units', 'normalized', 'outerposition', [0.2 0.15 0.6 0.7])
+    set(gca, 'fontweight', 'bold', 'fontsize', 13)
+    
+    for iRgn = find(~badRgn)
+        PC1 = pjnRgns{iRgn}(:, 1);
+        PC2 = pjnRgns{iRgn}(:, 2);
+        PC3 = pjnRgns{iRgn}(:, 3);
+        all_lines(iRgn) = plot3(PC1,PC2,PC3, 'color', rgnColors(iRgn, :), 'linewidth', 1.5);
+        plot3(PC1(1, :), PC2(1, :), PC3(1, :), 'linestyle', 'none', 'marker', 'd', 'markersize', 10, 'markeredgecolor', 'k', 'markerfacecolor', 'g')
+        plot3(PC1(end, :), PC2(end, :), PC3(end, :), 'linestyle', 'none', 'marker', 's', 'markersize', 10, 'markeredgecolor', 'k', 'markerfacecolor', 'r')
+        
+    end
+    set(gca, 'xlim', [-xL xL], 'ylim', [-yL yL], 'zlim', [-zL zL])
+    grid minor
+    view(3)
+    xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
+    title(gca, [monkey, ssnDate, ': consecutive Js (#trials=', num2str(size(subJReshAll, 1)), ') projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
+    legend(all_lines, rgnLabels, 'location', 'bestoutside')
+    print('-dtiff', '-r400', [RNNfigdir, 'topPCsIntraRgnJs_consecutive', filesep, monkey, ssnDate, '_topPCsIntraRgnJs_consecutive_v2'])
+    close
+    % try PCA on full J for consecutive trials
+    %     nUnits = size(intraRgnJ, 1);
+    %     consecutiveJ = intraRgnJ(:, :, trlsToPlot);
+    %     consecutiveJMean = mean(consecutiveJ, 3);
+    %     rmElementsFull = (consecutiveJMean > upperJ_cutoff & consecutiveJMean < lowerJ_cutoff);
     %
-    %     % set up figure
-    %         figure('color','w');
-    %         set(gcf, 'units', 'normalized', 'outerposition', [0 0 1 1])
-    %         AxTargs = arrayfun(@(i) subplot(4,2,i,'NextPlot', 'add', 'Box', 'on', 'TickDir','out', 'FontSize', 10, 'Fontweight', 'bold',  ...
-    %             'xtick', 1:50:shortestTrl, 'xticklabel', dtData*((1:50:shortestTrl) - 1), 'ytick', '', 'ydir', 'reverse', 'xdir', 'normal'), 1:nRegions);
-    %         cm = brewermap(100,'*RdGy');
+    %     consecutiveJResh = cell2mat(arrayfun(@(iTrl) ...
+    %         reshape(squeeze(consecutiveJ(:, :, iTrl)), 1, nUnits^2), 1 : size(consecutiveJ, 3), 'un', false)');
     %
-    %         softFac = 0.0000;
-    %         for iRgn =  1 : nRegions
-    %             if ~ismember(iRgn, find(badRgn))
-    %                 rgnLabel = rgns{iRgn, 1};
-    %                 rgnLabel(strfind(rgnLabel, '_')) = ' ';
-    %
-    %                 a = td.([rgns{iRgn,1}, '_spikes_avg']); % T x N
-    %
-    %                 % get the sort
-    %                 [~, idx] = max(a, [], 1);
-    %                 [~, rgnSort] = sort(idx);
-    %
-    %                 normfac = mean(abs(a), 1); % 1 x N
-    %                 tmpRgn = a; %./ (normfac + softFac);
-    %
-    %                 subplot(AxTargs(iRgn))
-    %                 imagesc(tmpRgn(:, rgnSort)' )
-    %                 axis(AxTargs(iRgn), 'tight')
-    %
-    %                 title(rgnLabel, 'fontweight', 'bold')
-    %                 set(gca, 'xcolor', rgnColors(iRgn,:),'ycolor', rgnColors(iRgn,:), 'linewidth', 2)
-    %                 xlabel('time (sec)'), ylabel('neurons')
-    %
-    %                 if iRgn == 2
-    %                     text(gca, -0.75*mean(get(gca,'xlim')), 1.1*max(get(gca,'ylim')), ...
-    %                         [allFiles{f}, ' trial averaged target rates'], 'fontweight', 'bold', 'fontsize', 13)
-    %                     [oldxlim, oldylim] = size(tmpRgn);
-    %                 end
-    %             end
-    %         end
-    %
-    %         set(AxTargs, 'CLim', [0 1])
-    %         oldpos = get(AxTargs(2),'Position');
-    %         colorbar(AxTargs(2)), colormap(cm);
-    %         set(AxTargs(2),'Position', oldpos)
-    %         set(AxTargs(2), 'xlim', [0 oldxlim], 'ylim', [0 oldylim])
-    %         print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_trl_avged_targets_by_rgn'])
-    %         close
-    %
+    %     % remove a bunch of elements
+    %     consecutiveJResh(:, rmElementsFull) = [];
     
     
-    %% initialize MP's data format (from all trials available)
+    %%
+    [w, scores, eigen, ~, pvar, mu] = pca(subJReshAll, 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
     
-    %     td = struct;
-    %
-    %     for iRgn = 1 : nRegions
-    %         in_rgn = rgns{iRgn, 3};
-    %         td.([rgns{iRgn,1}, '_spikes']) = DFull(in_rgn, :)';
-    %         td.([rgns{iRgn,1}, '_spikes_avg']) = DMean(in_rgn, :)';
-    %     end
-    %
-    %     %% compute currents, PCA on currents, and norm of top PCs for consecutive trials from a specified set, source, and target
-    %
-    %     for iTarget = 1:nRegions
-    %         in_target = inArrays{iTarget};
-    %
-    %         for iSource = 1:nRegions
-    %             in_source = inArrays{iSource};
-    %
-    %             if sum(in_target) >= n_PCs && sum(in_source) >= n_PCs
-    %
-    %                 P_inhAll = cell(nD, 1);
-    %                 P_excAll = cell(nD, 1);
-    %                 P_bothAll = cell(nD, 1);
-    %
-    %                 % get currents (normalized as in softNormalize as far as I can tell...)
-    %                 for i = 1 : nD
-    %
-    %                     % For each trial, collect currents and combine together for PCA
-    %                     JTrl = squeeze(J(:, :, trlsToPlot(i)));
-    %                     RTrl = R_ds{trlsToPlot(i)};
-    %
-    %                     % compute all currents
-    %                     P_both = JTrl(in_target, in_source) * RTrl(in_source, :);
-    %
-    %                     % compute inhibitory currents
-    %                     J_inh = JTrl;
-    %                     J_inh(J_inh > 0) = 0;
-    %                     P_inh = J_inh(in_target, in_source) * RTrl(in_source, :);
-    %
-    %                     % compute excitatory currents
-    %                     J_exc = JTrl;
-    %                     J_exc(J_exc < 0) = 0;
-    %                     P_exc = J_exc(in_target, in_source) * RTrl(in_source, :);
-    %
-    %                     P_bothAll{i} = P_both;
-    %                     P_inhAll{i} = P_inh(:, :);
-    %                     P_excAll{i} = P_exc(:, :);
-    %
-    %                 end
-    %
-    %                 % combine and transpose such that input is #samplepoints x #neurons
-    %                 P_bothAll = cell2mat(P_bothAll')';
-    %                 P_inhAll = cell2mat(P_inhAll')';
-    %                 P_excAll = cell2mat(P_excAll')';
-    %
-    %                 if doSmooth
-    %                     % inputs to smooth_data must be size [time channels]
-    %                     P_bothAll = smooth_data(P_bothAll, binSize, binSize * 5)';
-    %                     P_inhAll = smooth_data(P_inhAll, binSize, binSize * 5)';
-    %                     P_excAll = smooth_data(P_excAll, binSize, binSize * 5)';
-    %                 end
-    %
-    %                 % normalize after if smoothing by range of each neuron's firing
-    %                 % rate (neurons x samplepoints)
-    %                 P_bothAll = P_bothAll ./ (range(P_bothAll,2) + aFac);
-    %                 P_inhAll = P_inhAll ./ (range(P_inhAll,2) + aFac);
-    %                 P_excAll = P_excAll ./ (range(P_excAll,2) + aFac);
-    %
-    %                 % PCA on #samplepoints x #neurons for combined currents from
-    %                 % all trials within a given source and region.
-    %                 % w will be #neurons x #neurons
-    %                 % scores = sp x neurons
-    %                 % eigen = neurons x 1
-    %                 % mu = 1 x neurons
-    %                 [w, ~, ~, ~, ~, mu] = pca(P_bothAll', 'Algorithm','svd', 'Centered', center_data, 'Economy',0);
-    %
-    %                 % for each trial, combined currents only: project into low-D space and pick the num_dims requested
-    %                 tempProjAll = cell(nD  + 1, 1);
-    %                 normProjAll = cell(nD + 1, 1);
-    %                 tmpInds = [0; cumsum(trlDurs(trlsToPlot))];
-    %                 for i = 1 : nD
-    %
-    %                     % project over each trial
-    %                     % tmpInds = trlStarts(trlsToPlot(i), 1) : trlStarts(trlsToPlot(i), 2);
-    %                     iStart = tmpInds(i) + 1;
-    %                     iStop = tmpInds(i + 1);
-    %
-    %                     projData = P_bothAll(:, iStart : iStop)'; % # sample points x neurons for a given stim
-    %                     tempProj = (projData - repmat(mu,size(projData,1),1)) * w;
-    %
-    %                     % norm of n_PCs requested at each timepoint
-    %                     top_proj = tempProj(:, 1:n_PCs);
-    %                     normProj = zeros(size(top_proj,1),1);
-    %                     for tt = 1:size(top_proj,1)
-    %                         normProj(tt) = norm(top_proj(tt, :));
-    %                     end
-    %
-    %                     tempProjAll{i} = tempProj;
-    %                     normProjAll{i} = normProj;
-    %
-    %                 end
-    %
-    %                 td.(['Curr' rgns{iSource,1}, '_', rgns{iTarget,1}]) = P_bothAll'; % store as #samplepoints x #neurons
-    %                 td.(['Curr' rgns{iSource,1}, '_', rgns{iTarget,1},'_inh']) = P_inhAll'; % store as #samplepoints x #neurons
-    %                 td.(['Curr' rgns{iSource,1}, '_', rgns{iTarget,1},'_exc']) = P_excAll'; % store as #samplepoints x #neurons
-    %                 td.(['Curr' rgns{iSource,1}, '_', rgns{iTarget,1}, '_pca']) = tempProjAll; % store each trial as #samplepoints x #neurons
-    %                 td.(['Curr' rgns{iSource,1}, '_', rgns{iTarget,1}, '_pca_norm']) = normProjAll; % store each trial as #samplepoints x 1
-    %             end
-    %         end
-    %     end
-    %
-    %     %% prune bad units from target activity and currents by cutting any unit whose overall FR is below threshold
-    %
-    %     for iSource = 1 : nRegions
-    %         in_source = inArrays{iSource};
-    %
-    %         for iTarget = 1 : nRegions
-    %             in_target = inArrays{iTarget};
-    %
-    %             if sum(in_target) >= n_PCs && sum(in_source) >= n_PCs
-    %
-    %                 Dtmp = td.([rgns{iTarget,1}, '_spikes']);
-    %                 Dtmp_avg = td.([rgns{iTarget,1}, '_spikes_avg']);
-    %                 bad_units = mean(Dtmp, 1) < 0.0005;
-    %                 td.([rgns{iTarget,1}, '_spikes']) = Dtmp(:, ~bad_units);
-    %                 td.([rgns{iTarget,1}, '_spikes_avg']) = Dtmp_avg(:, ~bad_units);
-    %
-    %                 % remove target units below FR threshold from currents
-    %                 td.(['Curr' rgns{iSource,1} '_', rgns{iTarget,1}]) = td.(['Curr' rgns{iSource,1} '_', rgns{iTarget,1}])(:, ~bad_units);
-    %             end
-    %         end
-    %     end
-    %
-    %     %% plot currents (imagesc) - to do: currents over time or currents averaged?
-    %
-    %     close all
-    %     cm = brewermap(100,'*RdBu');
-    %     allP = [];
-    %
-    %     figure('color','w');
-    %     set(gcf, 'units', 'normalized', 'outerposition', [0.05 0.05 0.9 0.9])
-    %
-    %     AxCurr = arrayfun(@(i) subplot(4,2,i,'NextPlot', 'add', 'Box', 'off',  'TickDir', 'out', 'FontSize', 10, 'Fontweight', 'bold',...
-    %         'xtick', newTrlInds(1 : nD + 1), 'xticklabel', 1 : nD + 1, 'ytick', '', 'ydir', 'reverse', 'xdir', 'normal'), 1:nRegions);
-    %     count = 1;
-    %
-    %     for iTarget = 1:nRegions % One plot per target
-    %         in_target = inArrays{iTarget};
-    %
-    %         for iSource = 1:nRegions
-    %
-    %             if iSource ~= iTarget
-    %                 continue
-    %             end
-    %
-    %             if ~ismember(iTarget, find(badRgn))
-    %                 a = td.(['Curr', rgns{iTarget,1}, '_', rgns{iTarget,1}]);
-    %                 a = a(1 : newTrlInds(2) - 1, :); % get sort from first trial
-    %                 a = a./repmat(mean(abs(a), 1), size(a, 1), 1);
-    %                 idx = 1 : size(a, 2);
-    %             else
-    %                 continue
-    %             end
-    %
-    %             in_source = inArrays{iSource};
-    %
-    %             if sum(in_target) >= n_PCs && sum(in_source) >= n_PCs
-    %
-    %                 subplot(AxCurr(iSource));
-    %
-    %                 % divide by mean(abs(val)) of current for each unit
-    %                 P = td.(['Curr', rgns{iSource,1}, '_', rgns{iTarget,1}]);
-    %                 P = P(1 : newTrlInds(nD + 2) - 1, :); % do first nD + 1 trls
-    %                 P = P(:,idx); P = P ./ mean(abs(P),1);
-    %
-    %                 allP = [allP; P(:)];
-    %
-    %                 imagesc(P'); axis tight
-    %
-    %                 for s = 2 : nD + 1
-    %                     line(gca, [newTrlInds(s), newTrlInds(s)], get(gca, 'ylim'), 'color', 'black', 'linewidth', 1.25)
-    %                 end
-    %
-    %                 title([rgns{iSource,1} ' > ' rgns{iTarget,1}],'FontWeight', 'bold')
-    %                 xlabel('trials'), ylabel('neurons')
-    %
-    %                 if count==2
-    %                     text(AxCurr(count), -(1.25) * mean(get(AxCurr(count),'xlim')), -25, ...
-    %                         [allFiles{f}, ': intra-rgn currents over 1st ', num2str(nD + 1), ' trls'], 'fontweight', 'bold', 'fontsize', 13)
-    %                 end
-    %
-    %                 if iSource == 2
-    %                     [oldxlim, oldylim] = size(P);
-    %                 end
-    %
-    %             end
-    %
-    %             count = count + 1;
-    %
-    %         end
-    %
-    %     end
-    %
-    %     [~, L, U] = isoutlier(allP, 'percentile', [0.5 99.5]);
-    %     c = [-1 * max(abs([L, U])), max(abs([L, U]))];
-    %     set(AxCurr, 'clim', c)
-    %     oldpos = get(AxCurr(2),'Position');
-    %     colorbar(AxCurr(2)), colormap(cm);
-    %     set(AxCurr(2),'Position', oldpos)
-    %     set(AxCurr(2), 'xlim', [0 oldxlim], 'ylim', [0 oldylim])
-    %
-    %     print('-dtiff', '-r400', [RNNfigdir, allFiles{f}, '_intraRgnCurrents_consecutiveTrls'])
-    %
+    if ~isfolder([RNNfigdir, 'effDimFullIntraRgnJs_consecutive/'])
+        mkdir([RNNfigdir, 'effDimFullIntraRgnJs_consecutive/'])
+    end
+    figure('color','w'); hold on,
+    set(gcf, 'units', 'normalized', 'outerposition', [0.2 0.15 0.6 0.7])
+    set(gca, 'fontweight', 'bold', 'fontsize', 13)
+    plot(1 : length(eigen), cumsum(pvar), 'linewidth', 1.5, 'color', 'b')
+    grid minor, xlabel('# PCs (1% of actual total)'), ylabel('% var explained')
+    xlim(gca, [0 0.01 * round(size(subJReshAll, 2))]), ylim(gca, [0 110])
+    nPC_cutoff = find(cumsum(pvar) >= 99,1, 'first');
+    line(gca, [nPC_cutoff nPC_cutoff], get(gca, 'ylim'), 'linestyle', '--', 'linewidth', 1.5, 'color', 'k')
+    text(gca, round(1.2 * nPC_cutoff), 10, ['#PCs = ', num2str(nPC_cutoff)], 'fontweight', 'bold')
+    title(gca, [monkey, ssnDate, ': consecutive Js (#trials=', num2str(size(subJReshAll, 1)), ') projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
+    title(gca, [monkey, ssnDate, ': eff dim (99% var exp) for consecutive Js (#trials=', num2str(size(subJReshAll, 1)), ')'], 'fontsize', 14, 'fontweight', 'bold')
+    
+    print('-dtiff', '-r400', [RNNfigdir, 'effDimFullIntraRgnJs_consecutive', filesep, monkey, ssnDate, '_effDimFullIntraRgnJs_consecutive'])
+    close
+    
+    
+    if ~isfolder([RNNfigdir, 'topPCsFullIntraRgnJs_consecutive/'])
+        mkdir([RNNfigdir, 'topPCsFullIntraRgnJs_consecutive/'])
+    end
+    figure('color','w'); hold on,
+    set(gcf, 'units', 'normalized', 'outerposition', [0.2 0.15 0.6 0.7])
+    set(gca, 'fontweight', 'bold', 'fontsize', 13),
+    
+    nEl = [0; cumsum(nUnitsAll .^ 2)];
+    for iRgn = 2 : size(nEl)
+        startRgn = nEl(iRgn - 1) + 1;
+        stopRgn = nEl(iRgn) ;
+        
+        projData = subJReshAll(:, startRgn : stopRgn);
+        % tempProj = (projData - repmat(mu(startRgn : stopRgn), size(projData,1),1)) * w(startRgn : stopRgn, startRgn : stopRgn);
+        tempProj = (projData - repmat(mu, size(projData,1),1)) * w(startRgn : stopRgn, startRgn : stopRgn);
+        
+        x = tempProj;
+        all_lines(iRgn - 1) = plot3(x(:, 1), x(:, 2), x(:, 3), 'color', rgnColors(iRgn-1, :), 'linewidth', 1.5);
+        plot3(x(10 : 10 : end - 10, 1), x(10 : 10 : end - 10, 2), x(10 : 10 : end - 10, 3), 'linestyle', 'none', 'marker', 'o', 'markersize', 7, 'markeredgecolor', 'k', 'markerfacecolor', 'k')
+        plot3(x(1, 1), x(1, 2), x(1, 3), 'linestyle', 'none', 'marker', 'd', 'markersize', 10, 'markeredgecolor', 'k', 'markerfacecolor', 'g')
+        plot3(x(end, 1), x(end, 2), x(end, 3), 'linestyle', 'none', 'marker', 's', 'markersize', 10, 'markeredgecolor', 'k', 'markerfacecolor', 'r')
+        
+    end
+    set(gca, 'xlim', [-xL xL], 'ylim', [-yL yL], 'zlim', [-zL zL])
+    grid minor
+    
+    view(3)
+    xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
+    
+    title(gca, [monkey, ssnDate, ': consecutive Js (#trials=', num2str(size(subJReshAll, 1)), ') projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
+    legend(all_lines, rgnLabels, 'location', 'bestoutside')
+    print('-dtiff', '-r400', [RNNfigdir, 'topPCsFullIntraRgnJs_consecutive', filesep, monkey, ssnDate, '_topPCsFullIntraRgnJs_consecutive'])
+    close
+    
     
 end
 
