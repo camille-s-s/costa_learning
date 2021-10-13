@@ -60,6 +60,10 @@ if ~isfolder(rnnSubDir)
     mkdir(rnnSubDir)
 end
 
+if ~isfolder([rnnSubDir, 'WN/'])
+    mkdir([rnnSubDir, 'WN/'])
+end
+
 % set up final params
 dtRNN           = dtData / dtFactor;    % time step (in s) for integration
 ampWN           = sqrt( tauWN / dtRNN );
@@ -96,9 +100,9 @@ end
 if rmvOutliers
     figure('color','w');
     set(gcf, 'units', 'normalized', 'outerposition', [0.05 0.1 0.9 0.6])
-     AxD = arrayfun(@(i) subplot(1,2,i,'NextPlot', 'add', 'Box', 'on', ...
-         'TickDir','out', 'FontSize', 10, 'fontweight', 'bold'), 1:2);
-   
+    AxD = arrayfun(@(i) subplot(1,2,i,'NextPlot', 'add', 'Box', 'on', ...
+        'TickDir','out', 'FontSize', 10, 'fontweight', 'bold'), 1:2);
+    
     subplot(1, 2, 1), histogram(mean(targets, 2)), title('mean target FRs all units w/ outliers')
     outliers = isoutlier(mean(targets, 2), 'percentiles', [0.5 99.5]);
     targets = targets(~outliers, :);
@@ -155,8 +159,10 @@ fixOnInds = [find(allEvents == 1), size(targets, 2)];
 % get block/set structure (s sets of j trials each)
 firstTrlInd = find(T.trls_since_nov_stim == 0);
 lastTrlInd = find(T.trls_since_nov_stim  == 0) - 1;
+
 if lastTrlInd(1) ~= 0, keyboard, end
 if firstTrlInd(1) ~= 1, keyboard, end
+
 firstTrlInd(1) = [];
 lastTrlInd(1:2) = [];
 lastTrlInd = [lastTrlInd; height(T)]; % can't have a 0 ind
@@ -167,7 +173,7 @@ setID = [0; repelem(1:nSets, nTrlsPerSet)'];
 % initialize outputs
 stdData = zeros(1,nTrls);
 JTrls = NaN(nUnits, nUnits, nTrls);
-  
+
 try
     prevMdls = dir([rnnSubDir, RNNname, '_set*_trial*.mat']);
     allTrialIDs = unique(arrayfun(@(i) ...
@@ -190,11 +196,9 @@ catch
     prevTrl = NaN;
 end
 
-
 for iTrl = startTrl : nTrls % - 1 or nSets - 1
-
-    fprintf('\n')
     
+    fprintf('\n')
     disp([RNNname, ': training trial # ', num2str(iTrl), '.'])
     
     iStart = fixOnInds(iTrl); % start of trial
@@ -216,16 +220,12 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     
     % sidebar to save inputWN separately in the hopes of making loading
     % RNNs faster
-    if ~isfolder([rnnSubDir, 'WN/'])
-        mkdir([rnnSubDir, 'WN/'])
-    end
-    
     inputWNDataFnm = [rnnSubDir, 'WN/', RNNname, '_inputWN_trl', num2str(iTrl), '.mat'];
     
     if saveMdl
         save(inputWNDataFnm, 'inputWN', '-v7.3')
     end
-        
+    
     % initialize DI matrix J
     if trainFromPrev && iTrl == startTrl && exist('prevJ', 'var')
         J = prevJ;
@@ -237,7 +237,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         end
     end
     
-    J0 = J; % TO DO: ADD CHECK THAT J0(t) = J(t-1) aka prevJ
+    J0 = J; 
     
     % get standard deviation of entire data that we are looking at
     stdData(iTrl)  = std(reshape(currTargets(iTarget,:), length(iTarget)*length(tData), 1));
@@ -260,13 +260,12 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     if plotStatus
         f = figure('Position',[100 100 1800 600]);
     end
-    
-    % tic
-    
+        
     %% training
     
     % loop through training runs
     for nRun = 1 : nRunTot
+        
         % set initial condition to match target data
         H = currTargets(:, 1);
         
@@ -278,6 +277,8 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         JLearn = [];
         
         for tt = 2 : length(tRNN) % why start from 2?
+            
+            % index in actual RNN time
             tLearn = tLearn + dtRNN;
             
             % check if the current index is a reset point. Typically this won't
@@ -286,19 +287,16 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 H = currTargets(:, floor(tt / dtFactor) + 1);
             end
             
-            
             % compute next RNN step
             R(:, tt) = nonlinearity(H); %1./(1+exp(-H));
             
-            % debug
-%             if std(R(:, tt)) > 3 * mean(std(R(:, 2:tt)))
-%                 keyboard
-%             end
+            % zi(t)=sum (Jij rj) over j
+            JR(:, tt) = J * R(:, tt) + inputWN(:, tt);
             
-            JR(:, tt) = J * R(:, tt) + inputWN(:, tt);  % zi(t)=sum (Jij rj) over j
-            H = H + dtRNN * (-H + JR(:, tt)) / tauRNN; % update activity
+            % update activity
+            H = H + dtRNN * (-H + JR(:, tt)) / tauRNN;
             
-            % check if the RNN time coincides with a data point to update J
+            % update J if the RNN time coincides with a data point
             if tLearn >= dtData
                 tLearn = 0;
                 
@@ -307,8 +305,9 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 % if currTargets treated as smoothed rates, compare RNN
                 error = R(1:nUnits, tt) - currTargets(1:nUnits, iLearn);
                 
-                
-                if norm(error) > 10
+                if norm(error) > 15 % potential exploding gradient problem?
+                    disp(['potential exploding gradient problem at data timepoint ' num2str(iLearn), ...
+                        'nRun= ', num2str(nRun), ' trl= ', num2str(iTrl), '. . .'])
                     keyboard
                 end
                 
@@ -321,21 +320,33 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                     
                     % update terms for training runs
                     k = PJ * R(iTarget, tt); % N x 1
-                    rPr = R(iTarget, tt)' * k; % scalar; inverse cross correlation of network firing rates
-                    c = 1 / (1 + rPr); % learning rate
+                    
+                    % scalar; inverse cross correlation of network firing rates
+                    rPr = R(iTarget, tt)' * k;
+                    
+                    % learning rate
+                    c = 1 / (1 + rPr);
+                    
                     PJ = PJ - c * (k * k');
+                    
                     J(1:nUnits, iTarget) = J(1:nUnits, iTarget) - c * error(1:nUnits, :) * k';
-                    JLearn(:, :, iLearn - 1) = J; % for each learning step of a given run
+                    
+                    JLearn(:, :, iLearn - 1) = J; % for each learning step of a given run, save consecutive Js
                 end
                 
             end
         end
         
+        % if final run, save JLearn
+        if nRun == nRunTot
+            fittedConsJ = JLearn;
+        end
+        
         rModelSample = R(iTarget, iModelSample);
         
-        % compute variance explained of activity by units
-        froNorm(nRun) = norm(currTargets(iTarget,:) - rModelSample, 'fro' );
-        sqrtNTstd(nRun) = ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl));
+        % compute variance explained of activity by units (for debugging?)
+%         froNorm(nRun) = norm(currTargets(iTarget,:) - rModelSample, 'fro' );
+%         sqrtNTstd(nRun) = ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl));
         
         pVar = 1 - ( norm(currTargets(iTarget,:) - rModelSample, 'fro' ) / ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl)) ).^2;
         
@@ -386,38 +397,10 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
             drawnow;
         end
         
-%         if nRun == 1
-%             fprintf(num2str(nRun))
-%         elseif mod(nRun, 100) == 0
-%             fprintf('\n')
-%             fprintf(num2str(nRun))
-%         else
-%             fprintf('.')
-%         end
-        
     end
     
     % save J for next link
     JTrls(:, :, iTrl) = J;
-    
-    % sidebar to save J separately in the hopes of making loading
-    % RNNs faster (and crossreferencing
-%     JTensor = [rnnSubDir, RNNname, '_JTrl.mat'];
-%     
-%     if exist(JTensor, 'file') && iTrl ~= 1
-%         load(JTensor);
-%     elseif ~exist(JTensor, 'file') && iTrl == 1
-%         JAllTrl = JTrls;
-%     else
-%         disp('Jsaving mistake perhaps')
-%         keyboard
-%     end
-    
-%     JAllTrl(:, :, iTrl) = J;
-%     if saveMdl
-%         save(JTensor, 'JAllTrl', '-v7.3') % will cross reference with extracted from makeRNNPlots
-%     end
-%     clear JAllTrl
     
     % package up and save outputs at the end of training for each link
     RNN = struct;
@@ -464,6 +447,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         'dtData',               dtData, ...
         'J',                    J, ...
         'J0',                   J0, ...
+        'fittedConsJ',          fittedConsJ, ...
         'chi2',                 chi2, ...
         'pVars',                pVars, ...
         'stdData',              stdData(iTrl), ...
