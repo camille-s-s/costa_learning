@@ -15,6 +15,7 @@ rng(42)
 
 %% data meta
 % datadir         = '~/Dropbox (BrAINY Crew)/costa_learning/reformatted_data/';
+mouseVer        = '';
 
 %% data parameters
 dtData          = 0.010;                % time step (in s) of the training data
@@ -42,10 +43,6 @@ trainFromPrev   = false;                % assume you're starting from beginning,
 plotStatus      = true;
 saveMdl         = true;
 
-%% output directories
-rnnDir          = '~/Dropbox (BrAINY Crew)/costa_learning/models/';
-rnnSubDir       = [rnnDir, RNNname(strfind(RNNname, '_') + 1 : end), filesep];
-rnnFigDir       = '~/Dropbox (BrAINY Crew)/costa_learning/models/figures/';
 
 %% RNN
 
@@ -53,6 +50,11 @@ rnnFigDir       = '~/Dropbox (BrAINY Crew)/costa_learning/models/figures/';
 if exist('params','var')
     assignParams(who,params);
 end
+
+% define output directories
+rnnDir          = ['~/Dropbox (BrAINY Crew)/costa_learning/models/', mouseVer, filesep];
+rnnSubDir       = [rnnDir, RNNname(strfind(RNNname, '_') + 1 : end), filesep];
+rnnFigDir       = ['~/Dropbox (BrAINY Crew)/costa_learning/figures/', mouseVer, filesep];
 
 if ~isfolder(rnnSubDir)
     mkdir(rnnSubDir)
@@ -171,16 +173,21 @@ try
     allTrialIDs = unique(arrayfun(@(i) ...
         str2double(prevMdls(i).name(strfind(prevMdls(i).name,'trial') + 5 : end - 4)), ...
         1 : length(prevMdls)));
-    prevMdl = load([rnnSubDir prevMdls(allTrialIDs == max(allTrialIDs)).name]);
+    % prevMdl = load([rnnSubDir prevMdls(allTrialIDs == max(allTrialIDs)).name]);
+    prevMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, ...
+        '_set*_trial', num2str(max(allTrialIDs)), '.mat']).name]);
     prevJ = prevMdl.RNN.mdl.J;
     prevJ0 = prevMdl.RNN.mdl.J0;
+    prevTrl = prevMdl.RNN.mdl.iTrl;
     if trainFromPrev
         startTrl = prevMdl.RNN.mdl.iTrl + 1; % max(allTrialIDs) + 1;
     else
         startTrl = 1;
+        prevTrl = 0;
     end
 catch
     startTrl = 1;
+    prevTrl = NaN;
 end
 
 
@@ -200,6 +207,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     % set up white noise inputs (from CURBD)
     iWN = ampWN * randn( nUnits, length(tRNN) );
     inputWN = ones(nUnits, length(tRNN));
+    
     for tt = 2 : length(tRNN)
         inputWN(:, tt) = iWN(:, tt) + (inputWN(:, tt - 1) - iWN(:, tt)) * exp( -(dtRNN / tauWN) );
     end
@@ -211,17 +219,8 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     if ~isfolder([rnnSubDir, 'WN/'])
         mkdir([rnnSubDir, 'WN/'])
     end
+    
     inputWNDataFnm = [rnnSubDir, 'WN/', RNNname, '_inputWN_trl', num2str(iTrl), '.mat'];
-    % if exist(inputWNData, 'file') && iTrl ~= 1
-        % load(inputWNData);
-    % elseif ~exist(inputWNData, 'file') && iTrl == 1
-        % inputWNAllTrl = cell(nTrls, 2);
-        % inputWNAllTrl(:, 1) = num2cell(1 : nTrls);
-    % else
-        % disp('WN saving mistake perhaps')
-        % keyboard
-    % end
-    % inputWNAllTrl{iTrl, 2} = inputWN;
     
     if saveMdl
         save(inputWNDataFnm, 'inputWN', '-v7.3')
@@ -276,6 +275,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         
         tLearn = 0; % keeps track of current time
         iLearn = 1; % keeps track of last data point learned
+        JLearn = [];
         
         for tt = 2 : length(tRNN) % why start from 2?
             tLearn = tLearn + dtRNN;
@@ -286,8 +286,15 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 H = currTargets(:, floor(tt / dtFactor) + 1);
             end
             
+            
             % compute next RNN step
             R(:, tt) = nonlinearity(H); %1./(1+exp(-H));
+            
+            % debug
+%             if std(R(:, tt)) > 3 * mean(std(R(:, 2:tt)))
+%                 keyboard
+%             end
+            
             JR(:, tt) = J * R(:, tt) + inputWN(:, tt);  % zi(t)=sum (Jij rj) over j
             H = H + dtRNN * (-H + JR(:, tt)) / tauRNN; % update activity
             
@@ -299,6 +306,11 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 % if currTargets are treated as currents, compare JR
                 % if currTargets treated as smoothed rates, compare RNN
                 error = R(1:nUnits, tt) - currTargets(1:nUnits, iLearn);
+                
+                
+                if norm(error) > 10
+                    keyboard
+                end
                 
                 % update chi2 using this error
                 chi2(nRun) = chi2(nRun) + mean(error.^2);
@@ -313,6 +325,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                     c = 1 / (1 + rPr); % learning rate
                     PJ = PJ - c * (k * k');
                     J(1:nUnits, iTarget) = J(1:nUnits, iTarget) - c * error(1:nUnits, :) * k';
+                    JLearn(:, :, iLearn - 1) = J; % for each learning step of a given run
                 end
                 
             end
@@ -321,7 +334,15 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         rModelSample = R(iTarget, iModelSample);
         
         % compute variance explained of activity by units
+        froNorm(nRun) = norm(currTargets(iTarget,:) - rModelSample, 'fro' );
+        sqrtNTstd(nRun) = ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl));
+        
         pVar = 1 - ( norm(currTargets(iTarget,:) - rModelSample, 'fro' ) / ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl)) ).^2;
+        
+        if pVar < 0
+            keyboard
+        end
+        
         pVars(nRun) = pVar;
         
         % plot
@@ -381,22 +402,22 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     
     % sidebar to save J separately in the hopes of making loading
     % RNNs faster (and crossreferencing
-    JTensor = [rnnSubDir, RNNname, '_JTrl.mat'];
+%     JTensor = [rnnSubDir, RNNname, '_JTrl.mat'];
+%     
+%     if exist(JTensor, 'file') && iTrl ~= 1
+%         load(JTensor);
+%     elseif ~exist(JTensor, 'file') && iTrl == 1
+%         JAllTrl = JTrls;
+%     else
+%         disp('Jsaving mistake perhaps')
+%         keyboard
+%     end
     
-    if exist(JTensor, 'file') && iTrl ~= 1
-        load(JTensor);
-    elseif ~exist(JTensor, 'file') && iTrl == 1
-        JAllTrl = JTrls;
-    else
-        disp('Jsaving mistake perhaps')
-        keyboard
-    end
-    
-    JAllTrl(:, :, iTrl) = J;
-    if saveMdl
-        save(JTensor, 'JAllTrl', '-v7.3') % will cross reference with extracted from makeRNNPlots
-    end
-    clear JAllTrl
+%     JAllTrl(:, :, iTrl) = J;
+%     if saveMdl
+%         save(JTensor, 'JAllTrl', '-v7.3') % will cross reference with extracted from makeRNNPlots
+%     end
+%     clear JAllTrl
     
     % package up and save outputs at the end of training for each link
     RNN = struct;
@@ -433,6 +454,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     
     RNN.mdl = struct( ...
         'iTrl',                 iTrl, ...
+        'prevTrl',              prevTrl, ...
         'setID',                setID(iTrl), ...
         'RMdlSample',           rModelSample, ...
         'tRNN',                 tRNN, ...
