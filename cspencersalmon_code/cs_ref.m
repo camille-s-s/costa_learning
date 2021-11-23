@@ -35,6 +35,7 @@
 % Qsa=IEV+FEV; Qt=FEV; %% ps. These kind of parameters are from our RL model.
 % BHVout: variates extracted from behavioral file. (see details in slide3)
 
+arrayfun(@(iTrl) subJ(rmElements) = NaN
 
 % novel or not (trlssincenov), reward or not...
 
