@@ -42,8 +42,8 @@ trainFromPrev   = false;                % assume you're starting from beginning,
 %% output options
 plotStatus      = true;
 saveMdl         = true;
-
-
+nSamples        = 21;                   % #samples to save from consecutive fitted Js
+minLen          = NaN;                  % minimum trial length (ensures equivalent elapsed time across subsampled consecutive fitted Js)
 %% RNN
 
 % overwrite defaults based on inputs
@@ -156,6 +156,14 @@ nTrls = height(T);
 % pull trial starts
 fixOnInds = [find(allEvents == 1), size(targets, 2)];
 
+if isnan(minLen)
+    minLen = min(diff(fixOnInds)); % shortest trial (from fixation to next fixation)
+end
+
+% pull event labels by trial (in time relative to start of each trial)
+% (1 = fixation, 2 = stim, 3 = choice, 4 =  outcome, 5 = time of next trl fixation)
+stimTimeInds = find(allEvents == 2) - find(allEvents == 1);
+
 % get block/set structure (s sets of j trials each)
 firstTrlInd = find(T.trls_since_nov_stim == 0);
 lastTrlInd = find(T.trls_since_nov_stim  == 0) - 1;
@@ -244,6 +252,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     
     % get indices for each sample of model data for getting pVar
     iModelSample = zeros(length(tData), 1);
+    
     for i = 1:length(tData)
         [~, iModelSample(i)] = min(abs(tData(i) - tRNN));
     end
@@ -274,7 +283,6 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         
         tLearn = 0; % keeps track of current time
         iLearn = 1; % keeps track of last data point learned
-        JLearn = [];
         
         for tt = 2 : length(tRNN) % why start from 2?
             
@@ -307,8 +315,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 
                 if norm(error) > 15 % potential exploding gradient problem?
                     disp(['potential exploding gradient problem at data timepoint ' num2str(iLearn), ...
-                        'nRun= ', num2str(nRun), ' trl= ', num2str(iTrl), '. . .'])
-                    keyboard
+                        ', nRun= ', num2str(nRun), ' trl= ', num2str(iTrl), '. . .'])
                 end
                 
                 % update chi2 using this error
@@ -331,7 +338,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                     
                     J(1:nUnits, iTarget) = J(1:nUnits, iTarget) - c * error(1:nUnits, :) * k';
                     
-                    JLearn(:, :, iLearn - 1) = J; % for each learning step of a given run, save consecutive Js
+                    JLearn(:, :, iLearn) = J; % for each learning step of a given run, save consecutive Js
                 end
                 
             end
@@ -339,7 +346,15 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         
         % if final run, save JLearn
         if nRun == nRunTot
-            fittedConsJ = JLearn;
+            % choose ~21 samples per trial from each consecutive J after model
+            % convergence (for Nayebi classifier parity) from stimulus time
+            % to minimum trial length for the session
+            
+            % so then need to go from stimOn to stimOn+minLen-1
+
+            % sampleTimePoints = round(linspace(stimTimeInds(iTrl), minLen, nSamples));
+            sampleTimePoints = round(linspace(stimTimeInds(iTrl), stimTimeInds(iTrl) + minLen, nSamples));
+            fittedConsJ = JLearn(:, :, sampleTimePoints);
         end
         
         rModelSample = R(iTarget, iModelSample);
@@ -351,7 +366,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         pVar = 1 - ( norm(currTargets(iTarget,:) - rModelSample, 'fro' ) / ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl)) ).^2;
         
         if pVar < 0
-            keyboard
+            disp('pVar < 0!')
         end
         
         pVars(nRun) = pVar;
@@ -448,6 +463,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         'J',                    J, ...
         'J0',                   J0, ...
         'fittedConsJ',          fittedConsJ, ...
+        'sampleTimePoints',     sampleTimePoints, ...
         'chi2',                 chi2, ...
         'pVars',                pVars, ...
         'stdData',              stdData(iTrl), ...
