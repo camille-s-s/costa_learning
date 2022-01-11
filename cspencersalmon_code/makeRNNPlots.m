@@ -19,7 +19,7 @@ setToPlot       = 2; % only one for now - must be 2 or greater to get last trial
 
 % in and outdirs
 bd              = '~/Dropbox (BrAINY Crew)/costa_learning/';
-mouseVer        = 'BRAIN_VERSION/';
+mouseVer        = 'PINKY_VERSION/';
 mdlDir          = [bd 'models/', mouseVer];
 RNNfigdir       = [bd 'figures/', mouseVer];
 RNNSampleDir    = [mdlDir filesep 'model_samples/'];
@@ -70,7 +70,6 @@ for iFile = 1 : length(allFiles) % for each session....
     tDataInit = RNN.mdl.tData;
     tRNNInit = RNN.mdl.tRNN;
     
-    
     assert(RNN.mdl.params.doSmooth == 1 & ...
         RNN.mdl.params.doSoftNorm == 1 & ....
         RNN.mdl.params.normByRegion == 0 & ...
@@ -91,8 +90,7 @@ for iFile = 1 : length(allFiles) % for each session....
     metafnm = [spikeInfoPath, monkey, ssnDate, '_spikesCont'];
     S = load(metafnm);
     targets = S.dsAllSpikes;
-    
-    
+
     % pull event labels by trial (in time relative to start of each trial)
     stimTimeInds = find(dsAllEvents == 2) - find(dsAllEvents == 1);
     %% recreate target prep from fitCostaRNN for comparison of targets from each trial
@@ -176,7 +174,7 @@ for iFile = 1 : length(allFiles) % for each session....
     pVarsTrls           = zeros(nTrls, 1);
     chi2Trls            = zeros(nTrls, 1);
     fittedJ             = cell(nTrls, 1);
-    fittedJMat          = NaN([fittedConsJDim, nTrls]);
+    % fittedJMat          = NaN([fittedConsJDim, nTrls]);
     
     tic
     
@@ -230,12 +228,11 @@ for iFile = 1 : length(allFiles) % for each session....
         R_U{i}              = mdl.RMdlSample(unscramble, :); % since targets(iTarget) == R
         % figure, scatter(mean(mdl.targets, 2), mean(mdl.RMdlSample(X, :), 2)), xlabel('targets unscambled'), ylabel('R unscrambled')
         
-        % choose ~21 samples per trial from each consecutive J after model
-        % convergence (for Nayebi classifier parity)
-        fittedJ{i}          = mdl.fittedConsJ(:, :, :);
-        fittedJMat(:, :, :, i) = mdl.fittedConsJ(:, :, :);
+        % samples
+        % fittedJ{i}          = mdl.fittedConsJ(:, :, :);
+        % fittedJMat(:, :, :, i) = mdl.fittedConsJ(:, :, :);
         allSPTimePoints(i, :) = mdl.sampleTimePoints;
-
+        
     end
     toc
     
@@ -299,7 +296,7 @@ for iFile = 1 : length(allFiles) % for each session....
     J0_U = J0_U(:, :, trlSort);
     R_U = R_U(trlSort);
     
-    fittedJ = fittedJ(trlSort);
+    % fittedJ = fittedJ(trlSort);
     allSPTimePoints = allSPTimePoints(trlSort, :);
     % sanity check that all J0s are different
     J0_resh = cell2mat(arrayfun(@(iTrl) ...
@@ -368,139 +365,172 @@ for iFile = 1 : length(allFiles) % for each session....
     
     %% get inds to order J by region
     
-    % self proof that this works
-    % n = 4;
-    % iTarget = randperm(n);
-    % A = magic(n);
-    % Ap = A(iTarget, iTarget);
-    % isequal(A, Ap(iTarget, iTarget))
+    % get original unit order (as trained) and reorder so within-rgn is on-diagonal and between-rgn is off-diagonal
+    count = 1;
+    nUnitsAll = NaN(nRegions, 1);
+    newOrder = [];
     
-%    for iSet = min(allSetIDs) : max(allSetIDs)
-        % get old order
-        count = 1;
-        nUnitsAll = NaN(nRegions, 1);
-        newOrder = [];
-        for iRgn = 1 : nRegions
-            in_rgn = rgns{iRgn,3}; 
-            newOrder = [newOrder; find(in_rgn)]; % reorder J so that rgns occur in order
-            nUnitsRgn = sum(in_rgn);
-            nUnitsAll(iRgn) = nUnitsRgn;
-            newIdx = count : count + nUnitsRgn - 1;
-            % intraJ(newIdx, newIdx, :) = J_U(in_rgn, in_rgn, :); % intra-region only
-            
-%             trlIDs = find(setID == iSet);
-%             for iTrl = trlIDs
-%                 
-%                 % re-order by region
-%                 intraJ{iTrl}(newIdx, newIdx, :) = fittedJ{iTrl}(in_rgn, in_rgn, :); % for subsampled consecutive Js for Nayeli classifier
-%                 
-%                 % J is reordered by region, so R_U must be as well
-%                 sampleTimePoints = allSPTimePoints(iTrl, :);
-%                 activitySampleAll{iTrl}(newIdx, :) = R_U{iTrl}(in_rgn, sampleTimePoints);
-%                 
-%             end
-            
-            count = count + nUnitsRgn;
-            
-        end
+    for iRgn = 1 : nRegions
+        in_rgn = rgns{iRgn,3};
+        newOrder = [newOrder; find(in_rgn)]; % reorder J so that rgns occur in order
+        nUnitsRgn = sum(in_rgn);
+        nUnitsAll(iRgn) = nUnitsRgn;
+        % newIdx = count : count + nUnitsRgn - 1;
+        % count = count + nUnitsRgn;
+    end
+    
+    %% reorder full J and use it to get intra/inter only Js
         
-%         intraJSample = intraJ(trlIDs);
-%         trlIDsCurrSet = allTrialIDs(trlIDs);
-%         activitySample = activitySampleAll(trlIDs);
-%         
-%         save([RNNSampleDir, 'classifier_matrices_IntraOnly', monkey, ssnDate, ...
-%             '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
-%         
-%         clear intraJSample activitySample
-
-%    end
-    
-    
-    %% reorder full J and use it to get 
-    
-    intraJ = repmat({zeros(size(fittedJ{1}))}, length(fittedJ), 1);
-    
-    % get old order/set up for future J plots reordered so within-rgn is on-diagonal and between-rgn is off-diagonal
-    
+    % get inds for new order by region
     tmp = [0; nUnitsAll];
     JLblPos = arrayfun(@(iRgn) sum(tmp(1 : iRgn-1)) + tmp(iRgn)/2, 2 : nRegions); % for the labels separating submatrices
     JLinePos = cumsum(nUnitsAll)'; % for the lines separating regions
     newRgnInds = [0, JLinePos];
+    activitySampleAll = NaN(sum(nUnitsAll), nSamples, nTrls);
     
-    % reordered by region, intra and inter region
-    fullJMat = fittedJMat(newOrder, newOrder, :, :); % reorder by new order
+    % J is reordered by region, so R_U must be as well
+    R_U_reordered = arrayfun(@(iTrl) R_U{iTrl}(newOrder, :), 1 : nTrls, 'un', 0)';
     
-    % initialize submatrices
-    interJMat = fullJMat; 
-    intraJMat = zeros(size(fullJMat));
-        
-    for iRgn = 1 : nRegions
-        in_rgn = newRgnInds(iRgn) + 1 : newRgnInds(iRgn + 1);
-        interJMat(in_rgn, in_rgn, :, :) = 0; % set intrargn values to zero
-        intraJMat(in_rgn, in_rgn, :, :) = fullJMat(in_rgn, in_rgn, :, :); % pull only intrargn values
-        %for iTrl = trlIDs
-        
-        % interJ{iTrl}(in_rgn, in_rgn, :) = 0; % pull out only inter
-        
-        % assert(isequal(fullRgnConsJ{iTrl}(in_rgn, in_rgn, :), intraRgnConsJ{iTrl}(in_rgn, in_rgn, :))) % sanity check
-        % end
-        
+    % get sample activvities
+    for iTrl = 1 : nTrls
+        sampleTimePoints = allSPTimePoints(iTrl, :);
+        activitySampleAll(:, :, iTrl) = R_U_reordered{iTrl}(:, sampleTimePoints);
     end
+    
+    % reorder full J by region (includes intra and inter region)
+%     fullJMat = fittedJMat(newOrder, newOrder, :, :); % reorder by new order
+%         
+%     % initialize submatrices
+%     interJMat = fullJMat;
+%     intraJMat = zeros(size(fullJMat));
+%     
+%     % extract submatrices
+%     for iRgn = 1 : nRegions
+%         in_rgn = newRgnInds(iRgn) + 1 : newRgnInds(iRgn + 1);
+%         interJMat(in_rgn, in_rgn, :, :) = 0; % set intrargn values to zero
+%         intraJMat(in_rgn, in_rgn, :, :) = fullJMat(in_rgn, in_rgn, :, :); % pull only intrargn values
+%     end
+    
+    % save J submatrices by set
+    
+    interJOverTrls = NaN(nTrls, 1);
+    intraJOverTrls = NaN(nTrls, 1);
+    fullJOverTrls = NaN(nTrls, 1);
     
     for iSet = min(allSetIDs) : max(allSetIDs)
         
         trlIDs = find(setID == iSet);
+        fittedJMatTmp = NaN([fittedConsJDim, numel(trlIDs)]);
+        count = 1;
         
-        interJSample = interJMat(:, :, :, trlIDs);
-        intraJSample = intraJMat(:, :, :, trlIDs);
-        fullJSample = fullJMat(:, :, :, trlIDs);
+        for iTrl = trlIDs
+            mdlfnm = dir([mdlDir, monkey, ssnDate, filesep, 'rnn_', monkey, ssnDate, '_set*_trial', num2str(iTrl), '.mat']);
+            tmp = load(mdlfnm.name);
+            mdl             = tmp.RNN.mdl;
+            fittedJMatTmp(:, :, :, count) =  mdl.fittedConsJ(:, :, :);
+            count = count + 1;
+            clear mdl
+        end
+        
+        % reorder full J by region (includes intra and inter region)
+        fullJMatTmp = fittedJMatTmp(newOrder, newOrder, :, :);
+            
+        % initialize submatrices
+        interJMatTmp = fullJMatTmp;
+        intraJMatTmp = zeros(size(fullJMatTmp));
+        
+        % extract submatrices
+        for iRgn = 1 : nRegions
+            in_rgn = newRgnInds(iRgn) + 1 : newRgnInds(iRgn + 1);
+            interJMatTmp(in_rgn, in_rgn, :, :) = 0; % set intrargn values to zero
+            intraJMatTmp(in_rgn, in_rgn, :, :) = fullJMatTmp(in_rgn, in_rgn, :, :); % pull only intrargn values
+        end
+
+        
+        % reorder
+        interJSample = interJMatTmp; %(:, :, :, trlIDs);
+        intraJSample = intraJMatTmp; %(:, :, :, trlIDs);
+        fullJSample = fullJMatTmp; %(:, :, :, trlIDs);
         trlIDsCurrSet = allTrialIDs(trlIDs);
-        activitySample = activitySampleAll(trlIDs);
+        activitySample = activitySampleAll(:, :, trlIDs);
+        
+        interJOverTrls(trlIDs) = squeeze(mean(interJMatTmp, [1 2 3]));
+        intraJOverTrls(trlIDs) = squeeze(mean(intraJMatTmp, [1 2 3]));
+        fullJOverTrls(trlIDs) = squeeze(mean(fullJSample, [1 2 3]));
+        
+        save([RNNSampleDir, 'classifier_matrices_IntraOnly', monkey, ssnDate, ...
+            '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
         
         save([RNNSampleDir, 'classifier_matrices_InterOnly', monkey, ssnDate, ...
             '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
         
-        clear interJSample activitySample
+        clear interJSample intraJSample activitySample
     end
     
     
     %% check full, intra, inter
-    
-    fullJOverTrls = squeeze(mean(nCellTonPlusOneMat(fullJ), [1 2 3]));
-    intraJOverTrls = squeeze(mean(nCellTonPlusOneMat(intraJ), [1 2 3]));
-    interJOverTrls = squeeze(mean(nCellTonPlusOneMat(interJ), [1 2 3]));
 
-    figure, 
-    plot(fullJOverTrls, 'k', 'linewidth', 1.5), hold on,
-    plot(intraJOverTrls, 'b', 'linewidth', 1.5)
-    plot(interJOverTrls, 'c', 'linewidth', 1.5)
-    set(gca, 'xlim', [1 nTrls])
-    legend(gca, {'full', 'intra', 'inter'}, 'location', 'northeast')
+    figure('color', 'w')
+    set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.25 0.8 0.5])
+    plot(intraJOverTrls, 'b:', 'linewidth', 1.25), hold on,
+    plot(interJOverTrls, 'm:', 'linewidth', 1.25)
+    plot(fullJOverTrls, 'k', 'linewidth', 1.75)
+    % TO DO: SET YLIM TO -2 and 2 e-3 2022/01/07
+    set(gca, 'fontweight', 'bold', 'xlim', [1 nTrls])
+    % set(gca, 'ylim', [ -1.05 * max(abs(get(gca, 'ylim'))) 1.05 * max(abs(get(gca, 'ylim')))])
+    set(gca, 'ylim', [-2e-3 3e-3])
+    xlabel('trial#', 'fontsize', 14),
+    legend(gca, {'intra', 'inter', 'full'}, 'location', 'northeast', 'autoupdate', 'off')
     
+    line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', 'k')
+    title(gca, [monkey, ssnDate, ': mean consecutive J over trls'], 'fontsize', 14, 'fontweight', 'bold')
+    
+    if ~isfolder([RNNfigdir, 'JOVerTrls', filesep])
+        mkdir([RNNfigdir, 'JOverTrls', filesep])
+    end
+    
+    print('-dtiff', '-r400', [RNNfigdir, 'JOverTrls', filesep, monkey, ssnDate, '_intraVsIntervsFull'])
+    close
+
     %% vectorized J: inter, intra
     
-    intraJResh = cell(nTrls, 1);
-    interJResh = cell(nTrls, 1);
-    fullJResh = cell(nTrls, 1);
+    intraJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
+    interJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
+    fullJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
+    
+    % self proof
+    tmp = intraJMat(:, :, 1, 1);
+    tmpResh = reshape(tmp, 1, numel(tmp));
+    isequal(tmp, reshape(tmpResh, size(tmp)))
     
     for iSet = min(allSetIDs) : max(allSetIDs)
         
         trlIDs = find(setID == iSet);
+        
         for iTrl = trlIDs
             
-            intraJResh{iTrl} = arrayfun(@(iSample) ...
-                reshape(squeeze(intraJ{iTrl}(:, :, iSample)), 1, size(in_rgn, 1)^2), 1 : nSamples, 'un', false);
-            interJResh{iTrl} = arrayfun(@(iSample) ...
-                reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-            fullJResh{iTrl} = arrayfun(@(iSample) ...
-                reshape(squeeze(fullJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
+            intraJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
+                reshape(intraJMat(:, :, iSample, iTrl), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
+          
+            interJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
+                reshape(interJMat(:, :, iSample, iTrl), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
+          
+            fullJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
+                reshape(fullJMat(:, :, iSample, iTrl), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
+            
+%             intraJResh{iTrl} = arrayfun(@(iSample) ...
+%                 reshape(squeeze(intraJ{iTrl}(:, :, iSample)), 1, size(in_rgn, 1)^2), 1 : nSamples, 'un', false);
+%             interJResh{iTrl} = arrayfun(@(iSample) ...
+%                 reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
+%             fullJResh{iTrl} = arrayfun(@(iSample) ...
+%                 reshape(squeeze(fullJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
         end
         
-        intraJSampleResh = intraJResh(trlIDs);
-        interJSampleResh = interJResh(trlIDs);
+        intraJSampleResh = intraJResh(:, :, trlIDs);
+        interJSampleResh = interJResh(:, :, trlIDs);
         % fullJSampleResh =
         trlIDsCurrSet = allTrialIDs(trlIDs);
-        activitySample = activitySampleAll(trlIDs);
+        activitySample = activitySampleAll(:, :, trlIDs);
 
         save([RNNSampleDir, 'classifier_matrices_resh_IntraOnly', monkey, ssnDate, ...
             '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
@@ -614,8 +644,6 @@ for iFile = 1 : length(allFiles) % for each session....
         ylabel('chi2'); xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(lastChi2(end), '%.3f')])
         set(gca,'Box','off','TickDir','out','FontSize',14);
         print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_lastTrlConvergence'])
-        fig2svg([RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_lastTrlConvergence.svg'], ...
-            gcf, 1, lgd)
         close
     end
     
