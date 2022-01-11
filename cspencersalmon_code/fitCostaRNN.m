@@ -91,7 +91,7 @@ if normByRegion
         inArray = strcmp(spikeInfo.array,arrayList{aa});
         
         arraySpikes = targets(inArray, :);
-        targets(inArray,:) = arraySpikes ./ max(max(arraySpikes));
+        targets(inArray, :) = arraySpikes ./ max(max(arraySpikes));
     end
 else
     targets = targets ./ max(max(targets));
@@ -104,7 +104,7 @@ if rmvOutliers
         'TickDir','out', 'FontSize', 10, 'fontweight', 'bold'), 1:2);
     
     subplot(1, 2, 1), histogram(mean(targets, 2)), title('mean target FRs all units w/ outliers')
-    outliers = isoutlier(mean(targets, 2), 'percentiles', [0.5 99.5]);
+    outliers = isoutlier(mean(targets, 2), 'percentiles', [1 99]);
     targets = targets(~outliers, :);
     spikeInfo = spikeInfo(~outliers, :);
     subplot(1, 2, 2), histogram(mean(targets, 2)), title(['mean target FRs all units minus ', num2str(sum(outliers)), ' outliers'])
@@ -182,7 +182,7 @@ setID = [0; repelem(1:nSets, nTrlsPerSet)'];
 stdData = zeros(1,nTrls);
 JTrls = NaN(nUnits, nUnits, nTrls);
 
-try
+try % attempt to start from last completed trial, if flag
     prevMdls = dir([rnnSubDir, RNNname, '_set*_trial*.mat']);
     allTrialIDs = unique(arrayfun(@(i) ...
         str2double(prevMdls(i).name(strfind(prevMdls(i).name,'trial') + 5 : end - 4)), ...
@@ -205,7 +205,7 @@ catch
 end
 
 for iTrl = startTrl : nTrls % - 1 or nSets - 1
-    
+    explodingGradWarn = false; clear fittedConsJ
     fprintf('\n')
     disp([RNNname, ': training trial # ', num2str(iTrl), '.'])
     
@@ -216,6 +216,9 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     tData = allPossTS(iStart:iStop); % timeVec for current data
     tRNN = tData(1) : dtRNN : tData(end); % timevec for RNN
     
+    % get fixed sample time points for subsampling J's and Rs
+    sampleTimePoints = round(linspace(stimTimeInds(iTrl), stimTimeInds(iTrl) + minLen, nSamples));
+
     % set up white noise inputs (from CURBD)
     iWN = ampWN * randn( nUnits, length(tRNN) );
     inputWN = ones(nUnits, length(tRNN));
@@ -245,7 +248,13 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         end
     end
     
-    J0 = J; 
+    J0 = J;
+    
+    % initialize fitted J per run in case of needing to stop training bc
+    % "exploding gradients"
+    JEndOfRun = NaN(nUnits, nUnits, nRunTot);
+    REndOfRun = NaN(nUnits, length(tRNN), nRunTot);
+    JLearnPrevRun = NaN(nUnits, nUnits, length(tData));
     
     % get standard deviation of entire data that we are looking at
     stdData(iTrl)  = std(reshape(currTargets(iTarget,:), length(iTarget)*length(tData), 1));
@@ -269,9 +278,11 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     if plotStatus
         f = figure('Position',[100 100 1800 600]);
     end
-        
+    
     %% training
     
+    JLearn = NaN(nUnits, nUnits, size(currTargets, 2));
+
     % loop through training runs
     for nRun = 1 : nRunTot
         
@@ -297,10 +308,8 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
             
             % compute next RNN step
             R(:, tt) = nonlinearity(H); %1./(1+exp(-H));
-            
             % zi(t)=sum (Jij rj) over j
             JR(:, tt) = J * R(:, tt) + inputWN(:, tt);
-            
             % update activity
             H = H + dtRNN * (-H + JR(:, tt)) / tauRNN;
             
@@ -309,13 +318,21 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 tLearn = 0;
                 
                 % error signal --> z(t)-f(t), where f(t) = target function
-                % if currTargets are treated as currents, compare JR
-                % if currTargets treated as smoothed rates, compare RNN
+                % if currTargets are  currents, compare JR
+                % if currTargets are rates, compare RNN
                 error = R(1:nUnits, tt) - currTargets(1:nUnits, iLearn);
                 
                 if norm(error) > 15 % potential exploding gradient problem?
                     disp(['potential exploding gradient problem at data timepoint ' num2str(iLearn), ...
                         ', nRun= ', num2str(nRun), ' trl= ', num2str(iTrl), '. . .'])
+%                     explodingGradWarn = true;
+%                     J = JEndOfRun(:, :, nRun - 1); % save fitted J from last good run - will use third dim here to figure out if this happened
+%                     R = REndOfRun(:, :, nRun - 1);
+%                     JLearn = JLearnPrev;
+%                     fittedConsJ = JLearn(:, :, sampleTimePoints);
+%                     chi2(nRun) = chi2(nRun - 1);
+%                     keyboard
+%                    break % stop scanning through data timepoints
                 end
                 
                 % update chi2 using this error
@@ -324,97 +341,78 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 % update learning index
                 iLearn = iLearn+1;
                 if (nRun <= nRunTrain)
-                    
                     % update terms for training runs
                     k = PJ * R(iTarget, tt); % N x 1
-                    
                     % scalar; inverse cross correlation of network firing rates
                     rPr = R(iTarget, tt)' * k;
-                    
                     % learning rate
                     c = 1 / (1 + rPr);
-                    
                     PJ = PJ - c * (k * k');
-                    
                     J(1:nUnits, iTarget) = J(1:nUnits, iTarget) - c * error(1:nUnits, :) * k';
-                    
-                    JLearn(:, :, iLearn) = J; % for each learning step of a given run, save consecutive Js
+                    % for each learning step of a given run, save consecutive Js
+                    JLearn(:, :, iLearn) = J; 
                 end
                 
             end
         end
         
-        % if final run, save JLearn
-        if nRun == nRunTot
-            % choose ~21 samples per trial from each consecutive J after model
-            % convergence (for Nayebi classifier parity) from stimulus time
-            % to minimum trial length for the session
-            
-            % so then need to go from stimOn to stimOn+minLen-1
-
-            % sampleTimePoints = round(linspace(stimTimeInds(iTrl), minLen, nSamples));
-            sampleTimePoints = round(linspace(stimTimeInds(iTrl), stimTimeInds(iTrl) + minLen, nSamples));
-            fittedConsJ = JLearn(:, :, sampleTimePoints);
-        end
-        
+        JLearnPrevRun = JLearn; % save current run's fitted JLearn as prev for next one
         rModelSample = R(iTarget, iModelSample);
-        
-        % compute variance explained of activity by units (for debugging?)
-%         froNorm(nRun) = norm(currTargets(iTarget,:) - rModelSample, 'fro' );
-%         sqrtNTstd(nRun) = ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl));
-        
         pVar = 1 - ( norm(currTargets(iTarget,:) - rModelSample, 'fro' ) / ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl)) ).^2;
+        pVars(nRun) = pVar;
+        JEndOfRun(:, :, nRun) = J; % save fitted J from end of a run for troubleshooting
+        REndOfRun(:, :, nRun) = R; % same as above
         
         if pVar < 0
             disp('pVar < 0!')
         end
         
-        pVars(nRun) = pVar;
+        % if final run, save JLearn
+        if nRun == nRunTot && ~explodingGradWarn
+            fittedConsJ = JLearn(:, :, sampleTimePoints);
+        end
         
         % plot
         if plotStatus
             clf(f);
             idx = randi(nUnits);
-            subplot(2,4,1);
-            hold on;
+            
+            subplot(2,4,1); hold on;
             imagesc(currTargets(iTarget,:)); colormap(jet), colorbar;
-            axis tight; set(gca, 'clim', [0 1])
-            title('real');
-            set(gca,'Box','off','TickDir','out','FontSize',14);
+            axis tight; set(gca, 'clim', [0 1], 'Box','off','TickDir', 'out', 'FontSize', 14),
+            title('real')
             
-            subplot(2,4,2);
-            hold on;
+            subplot(2,4,2); hold on;
             imagesc(R(iTarget,:)); colormap(jet), colorbar;
-            axis tight; set(gca, 'clim', [0 1])
+            axis tight; set(gca, 'clim', [0 1], 'Box','off','TickDir', 'out', 'FontSize', 14)
             title('model');
-            set(gca,'Box','off','TickDir','out','FontSize',14);
             
-            subplot(2,4,[3 4 7 8]);
-            hold all;
+            subplot(2, 4, [3 4 7 8]); hold all;
             plot(tRNN,R(iTarget(idx),:), 'linewidth', 1.5);
             plot(tData,currTargets(iTarget(idx),:), 'linewidth', 1.5);
-            axis tight; set(gca, 'ylim', [-0.1 1], 'Box','off','TickDir', 'out', 'FontSize', 14)
+            axis tight; set(gca, 'ylim', [-0.1 1], 'Box','off', 'TickDir', 'out', 'FontSize', 14)
             ylabel('activity'); xlabel('time (s)'),
             legend('model', 'real', 'location', 'eastoutside')
             title(['run ', num2str(nRun)])
             
-            subplot(2,4,5);
-            hold on;
+            subplot(2,4,5); hold on;
             plot(pVars(1:nRun)); ylabel('pVar');
             set(gca, 'ylim', [-0.1 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 14);
             title(['current pVar=', num2str(pVars(nRun), '%.3f')])
             
-            subplot(2,4,6);
-            hold on;
+            subplot(2,4,6); hold on;
             plot(chi2(1:nRun)); ylabel('chi2');
-            set(gca, 'ylim', [-0.1 1], 'Box','off','TickDir', 'out', 'FontSize', 14);
+            set(gca, 'ylim', [-0.1 1], 'Box', 'off','TickDir', 'out', 'FontSize', 14);
             title(['current chi2=', num2str(chi2(nRun), '%.3f')])
             drawnow;
         end
-        
+                
+%         if explodingGradWarn
+%             break % don't do any more runs - just move on to next trial
+%         end
     end
     
-    % save J for next link
+    % save J for next trial
     JTrls(:, :, iTrl) = J;
     
     % package up and save outputs at the end of training for each link
@@ -476,8 +474,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         save([rnnSubDir, RNNname, '_set', num2str(setID(iTrl)), '_trial', num2str(iTrl), '.mat'],'RNN', '-v7.3')
     end
     
-    clear RNN
-    % toc
+    clear RNN fittedConsJ JLearnPrev    
     
 end
 
