@@ -70,19 +70,32 @@ ampWN           = sqrt( tauWN / dtRNN );
 nRunFree        = ceil(0.01 * nRunTrain);
 nRunTot         = nRunTrain + nRunFree;   % idk according to CURBD
 
-% preprocess targets by smoothing, normalizing, re-scaling, and outlier removing
-targets = allSpikes;
+%% preprocess targets by smoothing, normalizing, re-scaling, and outlier removing
 
+
+fPreProc = figure('color', 'w');
+set(fPreProc, 'units', 'normalized', 'outerposition', [0 0.05 1 0.9]);
+        
+targets = allSpikes;
+subplot(2, 3, 1), hold on, histogram(targets(:)), title('1) raw')
+
+% cleaning: smooth with gaussian
 if doSmooth
     targets = smoothdata(targets, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from msec to #bins);
+    subplot(2, 3, 2),  histogram(targets(:)), title('2) smoothed')
 end
 
-% this will soft normalize a la Churchland papers
+meanTarg = targets - mean(targets, 2);
+
+% transformation: this will soft normalize a la Churchland papers (so all
+% activity is on roughly similar scale)
 if doSoftNorm
     normfac = range(targets, 2); % + (dtData * 10); % normalization factor = firing rate range + alpha
     targets = targets ./ normfac;
+    subplot(2, 3, 3), histogram(targets(:)), title('3) soft-normed')
 end
 
+% transformation: scale to [0 1]
 if normByRegion
     arrayList = unique(spikeInfo.array);
     nArray = length(arrayList);
@@ -95,8 +108,10 @@ if normByRegion
     end
 else
     targets = targets ./ max(max(targets));
+    subplot(2, 3, 4), histogram(targets(:)), title('4) re-scaled [0 1]')
 end
 
+% cleaning: outlier removal
 if rmvOutliers
     figure('color','w');
     set(gcf, 'units', 'normalized', 'outerposition', [0.05 0.1 0.9 0.6])
@@ -124,12 +139,15 @@ if rmvOutliers
         arrayRgns{iRgn, 3}(outliers) = [];
     end
     
+    subplot(2, 3, 5), histogram(targets(:)), title('5) outliers rmved')
 end
 
 % housekeeping
 if any(isnan(targets(:)))
     keyboard
 end
+
+%%
 
 if plotStatus
     figure, subplot(1,2,1), imagesc(allSpikes), title('non-normed rates'), colorbar, colormap jet, subplot(1,2,2), imagesc(targets), colorbar, title('target rates')
@@ -201,8 +219,16 @@ try % attempt to start from last completed trial, if flag
     end
 catch
     startTrl = 1;
-    prevTrl = NaN;
+    prevTrl = 'no last completed trl in dir';
 end
+
+if startTrl == 1 % get popmean for each trial to coarsely check for big jumps in input data base stats
+    popTrlMean = NaN(1, nTrls);
+    for iTrl = 1 : nTrls
+        popTrlMean(iTrl) = mean(mean(targets(:, fixOnInds(iTrl) : fixOnInds(iTrl + 1) - 1), 2));
+    end
+end
+    
 
 for iTrl = startTrl : nTrls % - 1 or nSets - 1
     explodingGradWarn = false; clear fittedConsJ
