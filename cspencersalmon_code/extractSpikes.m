@@ -123,6 +123,7 @@ spikeInfoVarNames = {'monkey', 'array', 'date', 'nip', 'electrode', 'unit', 'por
 % w = gausswin(2*(smoothWidth/binSteps)); w(1:(smoothWidth/binSteps)) = [];
 % create gaussian kernel
 w = gausswin(smoothWidth);
+
 %% Loop through neurophys and behavioral files to extract all spike info we
 % might care about and put all event info we might care about into a
 % helpful table. For my own edification extract spikes as well
@@ -132,7 +133,6 @@ for iCoder = 1:length(coderFiles)
     alignedBinnedSpikes     = [];
     spikeInfo               = [];
     trlInfo                 = {};
-    spikeCountAll           = [];
     allEvents               = [];
     dsAllSpikes             = [];
     
@@ -147,12 +147,14 @@ for iCoder = 1:length(coderFiles)
     params = [fieldnames(tmpParams) struct2cell(tmpParams)];
 
     % get latest spike of the 2 nips
-    load([nphysDir, monkey, sessionDate, '_nip1.mat'], 'aTS', 'Coder')
-    T1 = aTS; C1 = Coder; clear aTS Coder
-    load([nphysDir, monkey, sessionDate, '_nip2.mat'], 'aTS', 'Coder')
-    T2 = aTS; C2 = Coder; clear aTS Coder
+    load([nphysDir, monkey, sessionDate, '_nip1.mat'], 'iCells', 'Coder')
+    % T1 = aTS; C1 = Coder; clear aTS Coder
+    T1 = iCells; C1 = Coder; clear iCells Coder
+    load([nphysDir, monkey, sessionDate, '_nip2.mat'], 'iCells', 'Coder')
+    T2 = iCells; C2 = Coder; clear iCells Coder
     
-    lastSpike = round(max([max(cellfun(@max, T1)), max(cellfun(@max, T2))]), numDP, 'decimals');
+    lastSpike = round(max([max(arrayfun(@(i) max(T1{i}.timestamps), 1 : length(T1))), ...
+        max(arrayfun(@(i) max(T2{i}.timestamps), 1 : length(T2)))]), numDP, 'decimals');
     allPossSpikeTimes = round([0 : initBinSize : lastSpike], numDP, 'decimals');
     
     while mod(size(allPossSpikeTimes,2), binSteps) ~= 0 % need windowWidth to be evenly divisible by specified binWidth
@@ -173,7 +175,7 @@ for iCoder = 1:length(coderFiles)
         
         nipNum = iNip;
         nphysNameParsed = [monkey, sessionDate, '_nip', num2str(nipNum), '.mat'];
-        load([nphysDir, nphysNameParsed], 'aTS', 'Bin', 'Coder', 'Neurons', 'spikeCount')
+        load([nphysDir, nphysNameParsed], 'iCells', 'Coder', 'Neurons')
         
         % make sure we are extracting non error trials only
         assert(isequal(Coder.validtrls, find(Coder.BHVerror==0)))
@@ -259,7 +261,7 @@ for iCoder = 1:length(coderFiles)
         winTimes = [lockEventTime+iStart, lockEventTime+iStop]; % bounds for all trials for ith unit
         
         % clock indices for winTimes
-        allTrlTS = cell2mat(arrayfun(@(iTrl) winTimes(iTrl,1):initBinSize:winTimes(iTrl,2), 1:nTrls, 'un', 0)');
+        % allTrlTS = cell2mat(arrayfun(@(iTrl) winTimes(iTrl,1):initBinSize:winTimes(iTrl,2), 1:nTrls, 'un', 0)');
         
         alignedBinnedSpikes_curr = NaN(nUnits, nTrls, nBins);
         
@@ -297,7 +299,7 @@ for iCoder = 1:length(coderFiles)
         for nn = 1:nUnits % For each unit in file
             
             % pull all of a given unit's spike timestamps
-            aTSUnit = aTS{nn};
+            aTSUnit = iCells{nn}.timestamps;
             allSpikeTS = round(aTSUnit, numDP, 'decimals'); 
             
             % get timestamps for spikes within bounds (winTimes)
@@ -351,8 +353,8 @@ for iCoder = 1:length(coderFiles)
         
         % concatenate nips along #neurons dimension (#trials and #bins
         % should be the same)
-        alignedBinnedSpikes = cat(1,alignedBinnedSpikes,alignedBinnedSpikes_curr);
-        spikeCountAll = cat(1, spikeCountAll, spikeCount);
+        alignedBinnedSpikes = cat(1,alignedBinnedSpikes, alignedBinnedSpikes_curr);
+        % spikeCountAll = cat(1, spikeCountAll, spikeCount);
         
         spikeInfo = [spikeInfo; spikeInfo_curr];
         trlInfo{iNip} = trlInfo_curr;
@@ -377,6 +379,9 @@ for iCoder = 1:length(coderFiles)
             snipRawNAll = [snipRawN_n1; snipRawN];
             snipFrNAll = [snipFrN_n1; snipFrN];
             snipDsNAll = [snipDsN_n1; snipDsN];
+        else
+            % wottisdis
+            error('unknown nip#')
         end
     end
     
@@ -395,9 +400,7 @@ for iCoder = 1:length(coderFiles)
     arrayfun(@(i) xlabel(AxEx(i), 'samplepoints (trl 1)'), 1:3)
     print('-dtiff', '-r400', [figDir, [monkey, sessionDate], '_pre_proc_example_single_neuron', paramStr])
     close
-    
-    
-    
+
     % downsample relevant bits
     dsSpikeTimes = downsample(allPossSpikeTimes, binSteps);
     dsAllEvents = zeros(1, nVecBins);
@@ -419,7 +422,7 @@ for iCoder = 1:length(coderFiles)
     spikeInfoCell = [spikeInfo.Properties.VariableNames; table2cell(spikeInfo)];
     
     % update nUnits
-    nUnits = size(alignedBinnedSpikes, 1);
+    nUnits = size(dsAllSpikes, 1);
     
     %% extract variables for plotting by array
     
@@ -491,7 +494,7 @@ for iCoder = 1:length(coderFiles)
     % fix clims, throw on labels and titles
     clims = get(AxD,'CLim');
     arrayfun(@(i) set(AxD(i),'CLim', [min(min(cell2mat(clims(1:nArray)))) max(max(cell2mat(clims(1:nArray))))]), 1:nArray)
-    arrayfun(@(i) xlabel(AxD(i), 'sec'), 5:8)
+    arrayfun(@(i) xlabel(AxD(i), 'sec'), 5:nArray)
     arrayfun(@(i) title(AxD(i), ['array ', arrayList{i}, ' (#units = ', num2str(nUnitsArray(i)), ')']), 1:nArray)
     measureNames = {'units (extracted)', 'units (spike count)'};
     ylabel(AxD(1), measureNames{1}), ylabel(AxD(5), measureNames{1})
