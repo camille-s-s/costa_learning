@@ -22,7 +22,7 @@ bd              = '~/Dropbox (BrAINY Crew)/costa_learning/';
 mouseVer        = 'PINKY_VERSION/';
 mdlDir          = [bd 'models/', mouseVer];
 RNNfigdir       = [bd 'figures/', mouseVer];
-RNNSampleDir    = [mdlDir filesep 'model_samples/'];
+RNNSampleDir    = [mdlDir 'model_samples/'];
 spikeInfoPath   = [bd 'reformatted_data/'];
 
 %%
@@ -43,7 +43,7 @@ if setToPlot < 2
     keyboard
 end
 
-for iFile = 1 : length(allFiles) % for each session....
+for iFile = 1 % : length(allFiles) % for each session....
     
     fName = allFiles(iFile).name;
     fID = fName(1:strfind(fName, '_') - 1);
@@ -70,6 +70,17 @@ for iFile = 1 : length(allFiles) % for each session....
     tDataInit = RNN.mdl.tData;
     tRNNInit = RNN.mdl.tRNN;
     
+%     assert(RNN.mdl.params.doSmooth == 1 & ...
+%         RNN.mdl.params.doSoftNorm == 1 & ....
+%         RNN.mdl.params.normByRegion == 0 & ...
+%         RNN.mdl.params.rmvOutliers == 1 & ...
+%         RNN.mdl.params.dtFactor == 20 & ...
+%         RNN.mdl.params.g == 1.5 & ...
+%         RNN.mdl.params.tauRNN == 0.001 & ...
+%         RNN.mdl.params.tauWN == 0.1 & ...
+%         RNN.mdl.params.ampInWN == 0.001 & ...
+%         RNN.mdl.params.nRunTot == 1010)
+%     
     assert(RNN.mdl.params.doSmooth == 1 & ...
         RNN.mdl.params.doSoftNorm == 1 & ....
         RNN.mdl.params.normByRegion == 0 & ...
@@ -79,7 +90,7 @@ for iFile = 1 : length(allFiles) % for each session....
         RNN.mdl.params.tauRNN == 0.001 & ...
         RNN.mdl.params.tauWN == 0.1 & ...
         RNN.mdl.params.ampInWN == 0.001 & ...
-        RNN.mdl.params.nRunTot == 1010)
+        RNN.mdl.params.nRunTot == 505) % for versions from 2022 onward (tentatively)
     
     if isfield(RNN.mdl.params, 'smoothWidth')
         assert(RNN.mdl.params.smoothWidth == 0.15)
@@ -90,38 +101,21 @@ for iFile = 1 : length(allFiles) % for each session....
     metafnm = [spikeInfoPath, monkey, ssnDate, '_spikesCont'];
     S = load(metafnm);
     targets = S.dsAllSpikes;
-
+    
     % pull event labels by trial (in time relative to start of each trial)
     stimTimeInds = find(dsAllEvents == 2) - find(dsAllEvents == 1);
     %% recreate target prep from fitCostaRNN for comparison of targets from each trial
     
+    % cleaning: smooth with gaussian
     if RNN.mdl.params.doSmooth
         targets = smoothdata(targets, 2, 'gaussian', 0.15 / RNN.mdl.dtData); % convert smoothing kernel from msec to #bins);
     end
     
-    % this will soft normalize a la Churchland papers
-    if RNN.mdl.params.doSoftNorm
-        normfac = range(targets, 2); % + (dtData * 10); % normalization factor = firing rate range + alpha
-        targets = targets ./ normfac;
-    end
-    
-    if RNN.mdl.params.normByRegion
-        arrayList = unique(spikeInfo.array);
-        nArray = length(arrayList);
-        
-        for aa = 1:nArray
-            inArray = strcmp(spikeInfo.array,arrayList{aa});
-            
-            arraySpikes = targets(inArray, :);
-            targets(inArray,:) = arraySpikes ./ max(max(arraySpikes));
-        end
-    else
-        targets = targets ./ max(max(targets));
-    end
-    
+    % cleaning: outlier removal
     if RNN.mdl.params.rmvOutliers
         
-        outliers = isoutlier(mean(targets, 2), 'percentiles', [0.5 99.5]);
+        % outliers = isoutlier(mean(targets, 2), 'percentiles', [0.5 99.5]);
+        outliers = isoutlier(mean(targets, 2), 'percentiles', [1 99]); % version as of 2022
         targets = targets(~outliers, :);
         
         if size(spikeInfo, 1) ~= size(targets, 1)
@@ -139,10 +133,41 @@ for iFile = 1 : length(allFiles) % for each session....
         end
     end
     
+    % transformation: center each neuron by subtracting its mean activity
+%     if RNN.mdl.params.meanSubtract
+%         meanTarg = targets - mean(targets, 2);
+%         targets = meanTarg;
+%     end
+    
+    % transformation: this will soft normalize a la Churchland papers
+    if RNN.mdl.params.doSoftNorm
+        normfac = range(targets, 2); % + (dtData * 10); % normalization factor = firing rate range + alpha
+        targets = targets ./ normfac;
+    end
+    
+    %     if RNN.mdl.params.normByRegion
+    %         arrayList = unique(spikeInfo.array);
+    %         nArray = length(arrayList);
+    %
+    %         for aa = 1:nArray
+    %             inArray = strcmp(spikeInfo.array,arrayList{aa});
+    %
+    %             arraySpikes = targets(inArray, :);
+    %             targets(inArray,:) = arraySpikes ./ max(max(arraySpikes));
+    %         end
+    %     else
+    %         targets = targets ./ max(max(targets));
+    %     end
+    
     % housekeeping
     if any(isnan(targets(:)))
         keyboard
     end
+    
+    % generate setID label from trlInfo table
+    nTrlsPerSet = diff([find(trlInfo.trls_since_nov_stim == 0); height(trlInfo) + 1]); % 2022/03/16 edit
+    nSets = sum(trlInfo.trls_since_nov_stim == 0); % 2022/03/16 edit
+    setID = repelem(1:nSets, nTrlsPerSet)'; % 2022/03/16 edit
     
     %% collect data
     
@@ -161,8 +186,8 @@ for iFile = 1 : length(allFiles) % for each session....
     
     % collect outputs for all trials in a session
     trlNum              = NaN(1, nTrls);
-    prevTrlNum          = NaN(1, nTrls);
-    setID               = NaN(1, nTrls);
+    % prevTrlNum          = NaN(1, nTrls);
+    % setID               = NaN(1, nTrls);
     R_U                 = cell(nTrls, 1);
     R_S                 = cell(nTrls, 1);
     J_U                 = NaN([JDim, nTrls]);
@@ -199,8 +224,8 @@ for iFile = 1 : length(allFiles) % for each session....
         [~, unscramble] = sort(iTarget); % Gives you indices from scrambled to unscrambled
         
         trlNum(i)           = mdl.iTrl;
-        prevTrlNum(i)       = mdl.prevTrl;
-        setID(i)            = mdl.setID;
+        % prevTrlNum(i)       = mdl.prevTrl;
+        % setID(i)            = mdl.setID;
         R_S{i}              = mdl.RMdlSample;
         J_S(:, :, i)        = mdl.J;
         J0_S(:, :, i)       = mdl.J0;
@@ -236,7 +261,7 @@ for iFile = 1 : length(allFiles) % for each session....
     end
     toc
     
-    if any(pVarsTrls < 0)
+    if sum(pVarsTrls < 0) >= 1
         disp(['running error for this session starting at trl ', num2str(find(pVarsTrls<0, 1)), '! ...'])
     end
     
@@ -271,9 +296,9 @@ for iFile = 1 : length(allFiles) % for each session....
     % if pVar glitched into negatives at some trial, only plot trls up to the last good
     % trial
     pVarsTrls = pVarsTrls(trlSort);
-    setID = setID(trlSort);
+    % setID = setID(trlSort);
     
-    if any(pVarsTrls < 0)
+    if sum(pVarsTrls < 0) > 5 % if more than one in a row....
         lastGoodTrl = find(pVarsTrls<0, 1) - 1;
         trlSort = trlSort(1 : lastGoodTrl);
         setID = setID(1 : lastGoodTrl);
@@ -284,7 +309,7 @@ for iFile = 1 : length(allFiles) % for each session....
         nTrls = trlNumLastGoodSet;
     end
     
-    setID = setID(trlSort);
+    % setID = setID(trlSort);
     D_S = D_S(trlSort); %  d = cell2mat(D_U'); isequal(d(iTarget, :), cell2mat(D_S'))
     D_U = D_U(trlSort);
     J_S = J_S(:, :, trlSort); % j = squeeze(mean(J_U, 3)), isequal(j(iTarget, iTarget), squeeze(mean(J_S, 3)))
@@ -306,7 +331,7 @@ for iFile = 1 : length(allFiles) % for each session....
     % compute some useful quantities. note that _U is in same unit order as
     % spikeInfo
     trlDursRNN = arrayfun(@(iTrl) size(D_U{iTrl}, 2), 1 : nTrls)';
-    [~, ia, ic] = unique(setID(setID ~= 0)');
+    [~, ia, ic] = unique(setID(setID ~= 1)');
     trlsPerSetRNN = accumarray(ic, 1);
     minTrlsPerSet = min(trlsPerSetRNN(:));
     DFull = cell2mat(D_U');
@@ -324,8 +349,13 @@ for iFile = 1 : length(allFiles) % for each session....
         1 : numel(trlsPerSetTbl) - n)); % TO DO NEXT: USE THIS IN LATER PLOTTING!
     
     if isempty(matchIx)
-        disp('might have incomplete set or not enough trials...')
-        keyboard
+        disp('might have incomplete set or not enough trials, trying xcorr comparison...')
+        [r, lags] = xcorr(trlsPerSetTbl, trlsPerSetRNN);
+        matchIx = lags(r == max(r));
+        if isempty(matchIx)
+            disp('might have incomplete set or not enough trials or other error. ')
+            keyboard
+        end
     end
     
     % sanity check #2: compare targets (FULL TARGETS, TRIALS CONCATENATED
@@ -375,8 +405,6 @@ for iFile = 1 : length(allFiles) % for each session....
         newOrder = [newOrder; find(in_rgn)]; % reorder J so that rgns occur in order
         nUnitsRgn = sum(in_rgn);
         nUnitsAll(iRgn) = nUnitsRgn;
-        % newIdx = count : count + nUnitsRgn - 1;
-        % count = count + nUnitsRgn;
     end
     
     %% reorder full J and use it to get intra/inter only Js
@@ -397,22 +425,7 @@ for iFile = 1 : length(allFiles) % for each session....
         activitySampleAll(:, :, iTrl) = R_U_reordered{iTrl}(:, sampleTimePoints);
     end
     
-    % reorder full J by region (includes intra and inter region)
-%     fullJMat = fittedJMat(newOrder, newOrder, :, :); % reorder by new order
-%         
-%     % initialize submatrices
-%     interJMat = fullJMat;
-%     intraJMat = zeros(size(fullJMat));
-%     
-%     % extract submatrices
-%     for iRgn = 1 : nRegions
-%         in_rgn = newRgnInds(iRgn) + 1 : newRgnInds(iRgn + 1);
-%         interJMat(in_rgn, in_rgn, :, :) = 0; % set intrargn values to zero
-%         intraJMat(in_rgn, in_rgn, :, :) = fullJMat(in_rgn, in_rgn, :, :); % pull only intrargn values
-%     end
-    
     % save J submatrices by set
-    
     interJOverTrls = NaN(nTrls, 1);
     intraJOverTrls = NaN(nTrls, 1);
     fullJOverTrls = NaN(nTrls, 1);
@@ -469,30 +482,139 @@ for iFile = 1 : length(allFiles) % for each session....
     
     
     %% check full, intra, inter
-
-    figure('color', 'w')
-    set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.25 0.8 0.5])
-    plot(intraJOverTrls, 'b:', 'linewidth', 1.25), hold on,
-    plot(interJOverTrls, 'm:', 'linewidth', 1.25)
-    plot(fullJOverTrls, 'k', 'linewidth', 1.75)
-    % TO DO: SET YLIM TO -2 and 2 e-3 2022/01/07
-    set(gca, 'fontweight', 'bold', 'xlim', [1 nTrls])
-    % set(gca, 'ylim', [ -1.05 * max(abs(get(gca, 'ylim'))) 1.05 * max(abs(get(gca, 'ylim')))])
-    set(gca, 'ylim', [-2e-3 3e-3])
-    xlabel('trial#', 'fontsize', 14),
-    legend(gca, {'intra', 'inter', 'full'}, 'location', 'northeast', 'autoupdate', 'off')
-    
-    line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', 'k')
-    title(gca, [monkey, ssnDate, ': mean consecutive J over trls'], 'fontsize', 14, 'fontweight', 'bold')
     
     if ~isfolder([RNNfigdir, 'JOVerTrls', filesep])
         mkdir([RNNfigdir, 'JOverTrls', filesep])
     end
     
-    print('-dtiff', '-r400', [RNNfigdir, 'JOverTrls', filesep, monkey, ssnDate, '_intraVsIntervsFull'])
+    trlsPerFig = 500;
+    
+    for f = 1 : ceil(nTrls / trlsPerFig) % new plot every five hundred trials
+        figure('color', 'w')
+        set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.25 0.8 0.5])
+        trlsToPlot = (f - 1) * trlsPerFig + 1 : (f * trlsPerFig);
+        
+        if trlsToPlot(end) > nTrls
+            trlsToPlot = (f - 1) * trlsPerFig + 1 : nTrls;
+        end
+        
+        plot(intraJOverTrls(trlsToPlot), 'b:', 'linewidth', 1.75), hold on,
+        plot(interJOverTrls(trlsToPlot), 'm:', 'linewidth', 1.75)
+        plot(fullJOverTrls(trlsToPlot), 'k', 'linewidth', 1.75)
+        set(gca, 'fontweight', 'bold', 'xlim', [1 trlsPerFig])
+        set(gca, 'ylim', [-2.5e-3 2.5e-3], ...
+            'xtick', floor(linspace(1, trlsPerFig, 6)), 'xticklabel', floor(linspace(trlsToPlot(1), trlsToPlot(end), 6))) 
+        xlabel('trial#', 'fontsize', 14),
+        legend(gca, {'intra', 'inter', 'full'}, 'location', 'northeast', 'autoupdate', 'off')
+        
+        line(gca, get(gca, 'xlim'), [0 0], 'linestyle', '-.', 'linewidth', 1, 'color', [0.2 0.2 0.2])
+        title(gca, [monkey, ssnDate, ': mean consecutive J over trls'], 'fontsize', 14, 'fontweight', 'bold')
+        
+        print('-dtiff', '-r400', [RNNfigdir, 'JOverTrls', filesep, monkey, ssnDate, '_intraVsIntervsFull_', num2str(f)])
+        close
+    end
+    
+    %% pVar / chi2 for first and last J
+    
+    if ~isfolder([RNNfigdir, 'pVar', filesep])
+        mkdir([RNNfigdir, 'pVar', filesep])
+    end
+    
+    figure, set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.15 0.8 0.7]),
+    plot(pVarsTrls(trlSort), 'linewidth', 1.5, 'color', [0.05 0.4 0.15]), set(gca, 'ylim', [0.1 1], 'xlim', [1 nTrls]),
+    title(gca, [monkey, ssnDate, ': pVar over trials'], 'fontsize', 14, 'fontweight', 'bold')
+    print('-dtiff', '-r400', [RNNfigdir, 'pVar', filesep, monkey, ssnDate, '_eachTrl'])
     close
+    
+    if ~isfolder([RNNfigdir, 'convergence', filesep])
+        mkdir([RNNfigdir, 'convergence', filesep])
+    end
+    
+    idx = 15; % randi(size(intraRgnJ, 1));
+    figure('color', 'w')
+    set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.15 0.8 0.7])
+    nRun = size(firstPVars, 2);
+    subplot(2,4,1);
+    hold on;
+    imagesc(D_U{1}); colormap(jet), colorbar;
+    axis tight; set(gca, 'clim', [0 1], 'xtick', [50:50:350], 'xticklabel', [50:50:350] * dtData)
+    title('real'); xlabel('time (s)'), ylabel('units')
+    set(gca,'Box','off','TickDir','out','FontSize',14);
+    subplot(2,4,2);
+    hold on;
+    imagesc(R_U{1}); colormap(jet), colorbar;
+    axis tight; set(gca, 'clim', [0 1], 'xtick', [50:50:350], 'xticklabel', [50:50:350] * dtData)
+    title('model'); xlabel('time (s)'), ylabel('units')
+    set(gca,'Box','off','TickDir','out','FontSize',14);
+    subplot(2,4, [3 4 7 8]);
+    hold all;
+    plot(1 : size(R_U{1}, 2), R_U{1}(idx, :), 'linewidth', 1.5);
+    plot(1 : size(D_U{1}, 2), D_U{1}(idx, :), 'linewidth', 1.5);
+    axis tight; set(gca, 'ylim', [-0.05 0.5], 'xtick', [50:50:350], 'xticklabel', [50:50:350] * dtData)
+    ylabel('activity');
+    xlabel('time (s)'),
+    lgd = legend('model','real','location','eastoutside');
+    title('first trial')
+    set(gca,'Box','off','TickDir','out','FontSize',14);
+    subplot(2,4,5);
+    hold on;
+    plot(firstPVars(1:nRun), 'k', 'linewidth', 1.5);
+    ylabel('pVar');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final pVar=', num2str(firstPVars(end), '%.3f')])
+    set(gca,'Box','off','TickDir','out','FontSize',14);
+    subplot(2,4,6);
+    hold on;
+    plot(firstChi2(1:nRun), 'k', 'linewidth', 1.5)
+    ylabel('chi2');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(firstChi2(end), '%.3f')])
+    set(gca,'Box','off','TickDir','out','FontSize',14);
+    saveas(gcf, [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'], 'svg')
+    print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'])
+    % fig2svg([RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence.svg'], ...
+    % gcf, 1, lgd, [], [], 'jpg')
+    close
+    
+    % last
+    if ~any(pVarsTrls < 0)
+        
+        figure('color', 'w')
+        set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.15 0.8 0.7])
+        nRun = size(lastPVars, 2);
+        subplot(2,4,1);
+        hold on;
+        imagesc(D_U{end}); colormap(jet), colorbar;
+        axis tight; set(gca, 'clim', [0 1])
+        title('real');
+        set(gca,'Box','off','TickDir','out','FontSize',14);
+        subplot(2,4,2);
+        hold on;
+        imagesc(R_U{end}); colormap(jet), colorbar;
+        axis tight; set(gca, 'clim', [0 1])
+        title('model');
+        set(gca,'Box','off','TickDir','out','FontSize',14);
+        subplot(2,4,[3 4 7 8]);
+        hold all;
+        plot(1 : size(R_U{end}, 2), R_U{end}(idx, :), 'linewidth', 1.5);
+        plot(1 : size(D_U{end}, 2), D_U{end}(idx, :), 'linewidth', 1.5);
+        axis tight; set(gca, 'ylim', [-0.1 1])
+        ylabel('activity');
+        xlabel('time (s)'),
+        lgd = legend('model','real','location','eastoutside');
+        title('last trial')
+        set(gca,'Box','off','TickDir','out','FontSize',14);
+        subplot(2,4,5);
+        hold on;
+        plot(lastPVars(1:nRun), 'k', 'linewidth', 1.5);
+        ylabel('pVar');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final pVar=', num2str(lastPVars(end), '%.3f')])
+        set(gca,'Box','off','TickDir','out','FontSize',14);
+        subplot(2,4,6);
+        hold on;
+        plot(lastChi2(1:nRun), 'k', 'linewidth', 1.5)
+        ylabel('chi2'); xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(lastChi2(end), '%.3f')])
+        set(gca,'Box','off','TickDir','out','FontSize',14);
+        print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_lastTrlConvergence'])
+        close
+    end
 
-    %% vectorized J: inter, intra
+    %% vectorized J: inter, intra TO DO 2022/01/11: CHECK IF THIS WORKS 
     
     intraJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
     interJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
@@ -548,104 +670,7 @@ for iFile = 1 : length(allFiles) % for each session....
                 reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
     end
     
-    %% pVar / chi2 for first and last J
-    
-    if ~isfolder([RNNfigdir, 'pVar', filesep])
-        mkdir([RNNfigdir, 'pVar', filesep])
-    end
-    
-    figure, plot(pVarsTrls(trlSort), 'linewidth', 1.5), set(gca, 'ylim', [.90 1], 'xlim', [1 nTrls]),
-    title(gca, [monkey, ssnDate, ': pVar over trials'], 'fontsize', 14, 'fontweight', 'bold')
-    print('-dtiff', '-r400', [RNNfigdir, 'pVar', filesep, monkey, ssnDate, '_eachTrl'])
-    close
-    
-    if ~isfolder([RNNfigdir, 'convergence', filesep])
-        mkdir([RNNfigdir, 'convergence', filesep])
-    end
-    
-    idx = 15; % randi(size(intraRgnJ, 1));
-    figure('color', 'w')
-    set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.15 0.8 0.7])
-    nRun = size(firstPVars, 2);
-    subplot(2,4,1);
-    hold on;
-    imagesc(D_U{1}); colormap(jet), colorbar;
-    axis tight; set(gca, 'clim', [0 1], 'xtick', [50:50:350], 'xticklabel', [50:50:350] * dtData)
-    title('real'); xlabel('time (s)'), ylabel('units')
-    set(gca,'Box','off','TickDir','out','FontSize',14);
-    subplot(2,4,2);
-    hold on;
-    imagesc(R_U{1}); colormap(jet), colorbar;
-    axis tight; set(gca, 'clim', [0 1], 'xtick', [50:50:350], 'xticklabel', [50:50:350] * dtData)
-    title('model'); xlabel('time (s)'), ylabel('units')
-    set(gca,'Box','off','TickDir','out','FontSize',14);
-    subplot(2,4, [3 4 7 8]);
-    hold all;
-    plot(1 : size(R_U{1}, 2), R_U{1}(idx, :), 'linewidth', 1.5);
-    plot(1 : size(D_U{1}, 2), D_U{1}(idx, :), 'linewidth', 1.5);
-    axis tight; set(gca, 'ylim', [-0.05 0.5], 'xtick', [50:50:350], 'xticklabel', [50:50:350] * dtData)
-    ylabel('activity');
-    xlabel('time (s)'),
-    lgd = legend('model','real','location','eastoutside');
-    title('first trial')
-    set(gca,'Box','off','TickDir','out','FontSize',14);
-    subplot(2,4,5);
-    hold on;
-    plot(firstPVars(1:nRun), 'k', 'linewidth', 1.5);
-    ylabel('pVar');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final pVar=', num2str(firstPVars(end), '%.3f')])
-    set(gca,'Box','off','TickDir','out','FontSize',14);
-    subplot(2,4,6);
-    hold on;
-    plot(firstChi2(1:nRun), 'k', 'linewidth', 1.5)
-    ylabel('chi2');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(firstChi2(end), '%.3f')])
-    set(gca,'Box','off','TickDir','out','FontSize',14);
-    saveas(gcf, [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'], 'svg')
-    print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'])
-    % fig2svg([RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence.svg'], ...
-        % gcf, 1, lgd, [], [], 'jpg')
-    close
-    
-    % last
-    if ~any(pVarsTrls < 0)
-        
-        figure('color', 'w')
-        set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.15 0.8 0.7])
-        nRun = size(lastPVars, 2);
-        subplot(2,4,1);
-        hold on;
-        imagesc(D_U{end}); colormap(jet), colorbar;
-        axis tight; set(gca, 'clim', [0 1])
-        title('real');
-        set(gca,'Box','off','TickDir','out','FontSize',14);
-        subplot(2,4,2);
-        hold on;
-        imagesc(R_U{end}); colormap(jet), colorbar;
-        axis tight; set(gca, 'clim', [0 1])
-        title('model');
-        set(gca,'Box','off','TickDir','out','FontSize',14);
-        subplot(2,4,[3 4 7 8]);
-        hold all;
-        plot(1 : size(R_U{end}, 2), R_U{end}(idx, :), 'linewidth', 1.5);
-        plot(1 : size(D_U{end}, 2), D_U{end}(idx, :), 'linewidth', 1.5);
-        axis tight; set(gca, 'ylim', [-0.1 1])
-        ylabel('activity');
-        xlabel('time (s)'),
-        lgd = legend('model','real','location','eastoutside');
-        title('last trial')
-        set(gca,'Box','off','TickDir','out','FontSize',14);
-        subplot(2,4,5);
-        hold on;
-        plot(lastPVars(1:nRun), 'k', 'linewidth', 1.5);
-        ylabel('pVar');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final pVar=', num2str(lastPVars(end), '%.3f')])
-        set(gca,'Box','off','TickDir','out','FontSize',14);
-        subplot(2,4,6);
-        hold on;
-        plot(lastChi2(1:nRun), 'k', 'linewidth', 1.5)
-        ylabel('chi2'); xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(lastChi2(end), '%.3f')])
-        set(gca,'Box','off','TickDir','out','FontSize',14);
-        print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_lastTrlConvergence'])
-        close
-    end
+
     
      %% PCA OF TRAINED MODEL ACTIVITY MATRIX
         
