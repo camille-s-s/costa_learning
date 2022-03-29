@@ -19,7 +19,7 @@ setToPlot       = 2; % only one for now - must be 2 or greater to get last trial
 
 % in and outdirs
 bd              = '~/Dropbox (BrAINY Crew)/costa_learning/';
-mouseVer        = 'PINKY_VERSION/';
+mouseVer        = 'BRAIN_VERSION/';
 mdlDir          = [bd 'models/', mouseVer];
 RNNfigdir       = [bd 'figures/', mouseVer];
 RNNSampleDir    = [mdlDir 'model_samples/'];
@@ -43,7 +43,7 @@ if setToPlot < 2
     keyboard
 end
 
-for iFile = 1 % : length(allFiles) % for each session....
+for iFile = 5 % : length(allFiles) % for each session....
     
     fName = allFiles(iFile).name;
     fID = fName(1:strfind(fName, '_') - 1);
@@ -52,13 +52,13 @@ for iFile = 1 % : length(allFiles) % for each session....
     cd([mdlDir, monkey, ssnDate, filesep])
     currSsn = dir('rnn_*_set*_trial*.mat');
         
-    allSetIDs = unique(arrayfun(@(i) ...
-        str2double(currSsn(i).name(strfind(currSsn(i).name,'set') + 3 : strfind(currSsn(i).name,'trial') - 2)), 1:length(currSsn)));
+    % allSetIDs = unique(arrayfun(@(i) ...
+        % str2double(currSsn(i).name(strfind(currSsn(i).name,'set') + 3 : strfind(currSsn(i).name,'trial') - 2)), 1:length(currSsn)));
     allTrialIDs = unique(arrayfun(@(i) ...
         str2double(currSsn(i).name(strfind(currSsn(i).name,'trial') + 5 : end - 4)), 1:length(currSsn)));
     
     nTrls = length(allTrialIDs);
-    nSets = length(allSetIDs);
+    % nSets = length(allSetIDs);
     
     % for first trial of a session, pull params (this field is empty for
     % all other trials in a session)
@@ -168,6 +168,7 @@ for iFile = 1 % : length(allFiles) % for each session....
     nTrlsPerSet = diff([find(trlInfo.trls_since_nov_stim == 0); height(trlInfo) + 1]); % 2022/03/16 edit
     nSets = sum(trlInfo.trls_since_nov_stim == 0); % 2022/03/16 edit
     setID = repelem(1:nSets, nTrlsPerSet)'; % 2022/03/16 edit
+    allSetIDs = unique(setID);
     
     %% collect data
     
@@ -298,7 +299,7 @@ for iFile = 1 % : length(allFiles) % for each session....
     pVarsTrls = pVarsTrls(trlSort);
     % setID = setID(trlSort);
     
-    if sum(pVarsTrls < 0) > 5 % if more than one in a row....
+    if sum(pVarsTrls < 0) > 20 % if more than one in a row....
         lastGoodTrl = find(pVarsTrls<0, 1) - 1;
         trlSort = trlSort(1 : lastGoodTrl);
         setID = setID(1 : lastGoodTrl);
@@ -436,8 +437,8 @@ for iFile = 1 % : length(allFiles) % for each session....
         fittedJMatTmp = NaN([fittedConsJDim, numel(trlIDs)]);
         count = 1;
         
-        for iTrl = trlIDs
-            mdlfnm = dir([mdlDir, monkey, ssnDate, filesep, 'rnn_', monkey, ssnDate, '_set*_trial', num2str(iTrl), '.mat']);
+        for iTrl = 1 : length(trlIDs)
+            mdlfnm = dir([mdlDir, monkey, ssnDate, filesep, 'rnn_', monkey, ssnDate, '_set*_trial', num2str(trlIDs(iTrl)), '.mat']);
             tmp = load(mdlfnm.name);
             mdl             = tmp.RNN.mdl;
             fittedJMatTmp(:, :, :, count) =  mdl.fittedConsJ(:, :, :);
