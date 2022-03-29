@@ -73,16 +73,16 @@ nRunTot         = nRunTrain + nRunFree;   % idk according to CURBD
 %% preprocess targets by smoothing, normalizing, re-scaling, and outlier removing
 
 
-fPreProc = figure('color', 'w');
-set(fPreProc, 'units', 'normalized', 'outerposition', [0 0.05 1 0.9]);
+% fPreProc = figure('color', 'w');
+% set(fPreProc, 'units', 'normalized', 'outerposition', [0 0.05 1 0.9]);
         
 targets = allSpikes;
-subplot(2, 3, 1), hold on, histogram(targets(:)), title('1) raw')
+% subplot(2, 3, 1), hold on, histogram(targets(:)), title('1) raw')
 
 % cleaning: smooth with gaussian
 if doSmooth
     targets = smoothdata(targets, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from msec to #bins);
-    subplot(2, 3, 2),  histogram(targets(:)), title('2) smoothed')
+    % subplot(2, 3, 2),  histogram(targets(:)), title('2) smoothed')
 end
 
 meanTarg = targets - mean(targets, 2);
@@ -92,7 +92,7 @@ meanTarg = targets - mean(targets, 2);
 if doSoftNorm
     normfac = range(targets, 2); % + (dtData * 10); % normalization factor = firing rate range + alpha
     targets = targets ./ normfac;
-    subplot(2, 3, 3), histogram(targets(:)), title('3) soft-normed')
+    % subplot(2, 3, 3), histogram(targets(:)), title('3) soft-normed')
 end
 
 % transformation: scale to [0 1]
@@ -108,7 +108,7 @@ if normByRegion
     end
 else
     targets = targets ./ max(max(targets));
-    subplot(2, 3, 4), histogram(targets(:)), title('4) re-scaled [0 1]')
+    % subplot(2, 3, 4), histogram(targets(:)), title('4) re-scaled [0 1]')
 end
 
 % cleaning: outlier removal
@@ -139,7 +139,7 @@ if rmvOutliers
         arrayRgns{iRgn, 3}(outliers) = [];
     end
     
-    subplot(2, 3, 5), histogram(targets(:)), title('5) outliers rmved')
+    % subplot(2, 3, 5), histogram(targets(:)), title('5) outliers rmved')
 end
 
 % housekeeping
@@ -234,6 +234,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     explodingGradWarn = false; clear fittedConsJ
     fprintf('\n')
     disp([RNNname, ': training trial # ', num2str(iTrl), '.'])
+    tic
     
     iStart = fixOnInds(iTrl); % start of trial
     iStop = fixOnInds(iTrl + 1) - 1; % right before start of next trial
@@ -438,6 +439,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
 %         end
     end
     
+    toc
     % save J for next trial
     JTrls(:, :, iTrl) = J;
     
