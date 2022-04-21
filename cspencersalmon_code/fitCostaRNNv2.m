@@ -2,22 +2,17 @@ function RNN = fitCostaRNNv2(RNNname, ...
     allSpikes, allPossTS, allEvents, arrayUnit, T, arrayRgns, params)
 % Largely identical to fitCostaRNN except pre-processing steps.
 % 
-% OLD VERSION
-% 1. smooth
-% 2. soft normalize
-% 3. scale to [0 1]
-% 4. remove outliers
+% OLD VERSION 1. smooth 2. soft normalize 3. scale to [0 1] 4. remove
+% outliers
 %
-% THIS VERSION
-% 1. smooth
-% 2. remove outliers
-% 3. mean subtract for each neuron (maybe)
-% 4. soft normalize
+% THIS VERSION 1. smooth 2. remove outliers 3. mean subtract for each
+% neuron (maybe) 4. soft normalize
 
 rng(42)
 
 %% data meta
-% datadir         = '~/Dropbox (BrAINY Crew)/costa_learning/reformatted_data/';
+% datadir         = '~/Dropbox (BrAINY
+% Crew)/costa_learning/reformatted_data/';
 mouseVer        = '';
 
 %% data parameters
@@ -82,12 +77,12 @@ fPreProc = figure('color', 'w');
 set(fPreProc, 'units', 'normalized', 'outerposition', [0 0.05 1 0.9]);
         
 targets = allSpikes;
-subplot(2, 3, 1), hold on, histogram(targets(:)), title('1) raw')
+% subplot(2, 3, 1), hold on, histogram(targets(:)), title('1) raw')
 
 % cleaning: smooth with gaussian
 if doSmooth
     targets = smoothdata(targets, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from msec to #bins);
-    subplot(2, 3, 2),  histogram(targets(:)), title('2) smoothed')
+    % subplot(2, 3, 2),  histogram(targets(:)), title('2) smoothed')
 end
 
 % cleaning: outlier removal
@@ -117,7 +112,7 @@ if rmvOutliers
         arrayRgns{iRgn, 3}(outliers) = [];
     end
     
-    subplot(2, 3, 3), histogram(targets(:)), title('3) outliers rmved')
+    % subplot(2, 3, 3), histogram(targets(:)), title('3) outliers rmved')
 end
 
 % transformation: center each neuron by subtracting its mean activity
@@ -131,7 +126,7 @@ end
 if doSoftNorm
     normfac = range(targets, 2); % + (dtData * 10); % normalization factor = firing rate range + alpha
     targets = targets ./ normfac;
-    subplot(2, 3, 3), histogram(targets(:)), title('4) soft-normed')
+    % subplot(2, 3, 3), histogram(targets(:)), title('4) soft-normed')
 end
 
 % housekeeping
@@ -148,7 +143,8 @@ try % choose targ subset and starting trial
     allTrialIDs = unique(arrayfun(@(i) ...
         str2double(prevMdls(i).name(strfind(prevMdls(i).name,'trial') + 5 : end - 4)), ...
         1 : length(prevMdls)));
-    % prevMdl = load([rnnSubDir prevMdls(allTrialIDs == max(allTrialIDs)).name]);
+    % prevMdl = load([rnnSubDir prevMdls(allTrialIDs ==
+    % max(allTrialIDs)).name]);
     prevMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, ...
         '_set*_trial', num2str(max(allTrialIDs)), '.mat']).name]);
     prevJ = prevMdl.RNN.mdl.J;
@@ -157,8 +153,10 @@ try % choose targ subset and starting trial
     if trainFromPrev
         disp('trainFromPrev = True. Training from last completed trial...')
         startTrl = prevMdl.RNN.mdl.iTrl + 1; % max(allTrialIDs) + 1;
-        % initMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, '_set0_trial1.mat']).name]);
-        % targSubset = initMdl.RNN.mdl.params.targSubset; % ensure same unit subset used for all trials
+        % initMdl = load([rnnSubDir, dir([rnnSubDir, RNNname,
+        % '_set0_trial1.mat']).name]); targSubset =
+        % initMdl.RNN.mdl.params.targSubset; % ensure same unit subset used
+        % for all trials
     else
         disp('trainFromPrev = False. Training from trial 1...')
         startTrl = 1;
@@ -177,8 +175,7 @@ end
 clearvars prevMdls
 
 % for testing purposes train on subset of available units until model
-% finalized
-% targets = targets(targSubset, :);
+% finalized targets = targets(targSubset, :);
 
 if plotStatus
     figure, subplot(1,2,1), imagesc(allSpikes), title('non-normed rates'), colorbar, colormap jet, subplot(1,2,2), imagesc(targets), colorbar, title('target rates')
@@ -210,8 +207,9 @@ if isnan(minLen)
     minLen = min(diff(fixOnInds)); % shortest trial (from fixation to next fixation)
 end
 
-% pull event labels by trial (in time relative to start of each trial)
-% (1 = fixation, 2 = stim, 3 = choice, 4 =  outcome, 5 = time of next trl fixation)
+% pull event labels by trial (in time relative to start of each trial) (1 =
+% fixation, 2 = stim, 3 = choice, 4 =  outcome, 5 = time of next trl
+% fixation)
 stimTimeInds = find(allEvents == 2) - find(allEvents == 1);
 
 clearvars allEvents
@@ -226,9 +224,10 @@ if firstTrlInd(1) ~= 1, keyboard, end
 firstTrlInd(1) = [];
 lastTrlInd(1:2) = [];
 lastTrlInd = [lastTrlInd; height(T)]; % can't have a 0 ind
-% nTrlsPerSet = T.trls_since_nov_stim(lastTrlInd) + 1; % 10 <= j <= 30 according to paper ... 
+% nTrlsPerSet = T.trls_since_nov_stim(lastTrlInd) + 1; % 10 <= j <= 30
+% according to paper ...
 nTrlsPerSet = diff([find(T.trls_since_nov_stim == 0); height(T) + 1]); % 2022/03/16 edit
-% nSets = length(nTrlsPerSet); % s <= 32 according to paper ... 
+% nSets = length(nTrlsPerSet); % s <= 32 according to paper ...
 nSets = sum(T.trls_since_nov_stim == 0); % 2022/03/16 edit
 % setID = [0; repelem(1:nSets, nTrlsPerSet)'];
 setID = repelem(1:nSets, nTrlsPerSet)'; % 2022/03/16 edit
@@ -291,13 +290,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     end
     
     J0 = J;
-    
-    % initialize fitted J per run in case of needing to stop training bc
-    % "exploding gradients"
-    % JEndOfRun = NaN(nUnits, nUnits, nRunTot);
-    % REndOfRun = NaN(nUnits, length(tRNN), nRunTot);
-    % JLearnPrevRun = NaN(nUnits, nUnits, length(tData));
-    
+        
     % get standard deviation of entire data that we are looking at
     stdData(iTrl)  = std(reshape(currTargets(iTarget,:), length(iTarget)*length(tData), 1));
     
@@ -326,6 +319,11 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     JLearn = NaN(nUnits, nUnits, size(currTargets, 2));
 
     % loop through training runs
+    
+    % all_C = [];
+    c = 0.99; % 22/04/21 testing
+
+
     for nRun = 1 : nRunTot
         
         % set initial condition to match target data
@@ -335,21 +333,27 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         R(:, 1) = nonlinearity(H);
         
         tLearn = 0; % keeps track of current time
-        iLearn = 1; % keeps track of last data point learned
-        
+        iLearn = 1; % keeps track of last data point learned 
+
         for tt = 2 : length(tRNN) % why start from 2?
             
             % index in actual RNN time
             tLearn = tLearn + dtRNN;
             
-            % check if the current index is a reset point. Typically this won't
-            % be used, but it's an option for concatenating multi-trial data
+            % check if the current index is a reset point. Typically this
+            % won't be used, but it's an option for concatenating
+            % multi-trial data
             if ismember(tt, resetPoints)
                 H = currTargets(:, floor(tt / dtFactor) + 1);
             end
             
             % compute next RNN step
             R(:, tt) = nonlinearity(H);
+            
+            if any(isnan(R(:, tt)))
+                disp(['NaN in R at nRun=', num2str(nRun), ', tt= ', num2str(tt), '...'])
+            end
+            
             JR(:, tt) = J * R(:, tt) + inputWN(:, tt);
             
             % update activity
@@ -360,8 +364,8 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 tLearn = 0;
                 
                 % error signal --> z(t)-f(t), where f(t) = target function
-                % if currTargets are  currents, compare JR
-                % if currTargets are rates, compare RNN
+                % if currTargets are  currents, compare JR if currTargets
+                % are rates, compare RNN
                 error = R(1:nUnits, tt) - currTargets(1:nUnits, iLearn);
                 
                 if norm(error) > 15 % potential exploding gradient problem?
@@ -374,32 +378,72 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 
                 % update learning index
                 iLearn = iLearn+1;
+                                
                 if (nRun <= nRunTrain)
                     
-                    % update terms for training runs
+                    % update term: sq mdl activity
                     k = PJ * R(iTarget, tt); % N x 1
                     
-                    % scalar; inverse cross correlation of network firing rates
+                    % scalar; inv xcorr of ntwk firing rates use xcorr bc
+                    % when you square something it magnifies the
+                    % sensitivity to changes
                     rPr = R(iTarget, tt)' * k;
                     
-                    % learning rate
-                    c = 1 / (1 + rPr);
-                    PJ = PJ - c * (k * k');
-                    J(1:nUnits, iTarget) = J(1:nUnits, iTarget) - c * error(1:nUnits, :) * k';
+                    % learning rate: if big changes in FRs and wanna move
+                    % quickly/take big steps (aka momentum) - as closer,
+                    % don't wanna overshoot (convergence would take longer)
+                    % so take smaller steps
+                    % c = 1 / (1 + rPr); % tune learning rate by looking at magnitude of model activity
                     
-                    % for each learning step of a given run, save consecutive Js
+                    % all_C = [all_C, c]; % to see how c changes....
+                    
+                    % use squared firing rates (R * R^T) to update PJ -
+                    % maybe momentum effect?
+                    PJ = PJ - c * (k * k');
+                    
+                    %% feedback alignment (lilicrap 2016)
+                    % B = some random error matrix
+                    % J(1 : nUnits, iTarget) = J(1 : nUnits, iTarget) - B * c * error(1 : nUnits, :);
+                    
+                    % normally would do entire J matrix, use
+                    % pre-syn J instead of entire J ... in addition to line
+                    % 399, would add - 0.5 * norm(J(1 : nUnits)) .^ 2
+                    % should be equivalent to
+                    % pDecay = -0.5 * (sum(J(1 : nUnits, iTarget) .^2 )); % or 0.5 * norm(J(1 : nUnits, iTarget)) ^ 2
+                    % Amp IA - x(l+1) will be R, x(l) = currTarg dim R and
+                    % B(J) must align w currTargets currTarg' * J * R
+                    % pAmp = -trace(currTargets(1 : nUnits, iLearn)' * J(1 : nUnits, iTarget) * R(iTarget, tt));
+                    % pNull = 0.5 *  sum((J(1 : nUnits, iTarget) * R(iTarget, tt)) .^ 2);
+                    
+                    % 4/19 attempt
+                    pDecay = (1/2) *  norm(J(1 : nUnits, iTarget)) ^ 2;
+                    pAmp = -trace( currTargets(1 : nUnits, iLearn)' * J(1 : nUnits, iTarget) * R(iTarget, tt));
+                    pNull = (1/2) * norm(J(1 : nUnits, iTarget) * R(iTarget, tt)) ^2;
+                    IA = pDecay + pAmp + pNull;
+                    % J(1:nUnits, iTarget) = J(1:nUnits, iTarget) - c * error(1:nUnits, :) * k' + IA;
+                    
+                    %% plain J update
+                    % (pre-syn wts adjusted according to post-syn target)
+                    J(1 : nUnits, iTarget) = J(1 : nUnits, iTarget) - c * error(1 : nUnits, :) * k';
+                    
+                    
+                    %%
+                    
+                    % for each learning step of a given run, save
+                    % consecutive Js
                     JLearn(:, :, iLearn) = J; 
                 end
                 
             end
         end
         
-        % JLearnPrevRun = JLearn; % save current run's fitted JLearn as prev for next one
+        % JLearnPrevRun = JLearn; % save current run's fitted JLearn as
+        % prev for next one
         rModelSample = R(iTarget, iModelSample);
         pVar = 1 - ( norm(currTargets(iTarget,:) - rModelSample, 'fro' ) / ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl)) ).^2;
         pVars(nRun) = pVar;
-        % JEndOfRun(:, :, nRun) = J; % save fitted J from end of a run for troubleshooting
-        % REndOfRun(:, :, nRun) = R; % same as above
+        % JEndOfRun(:, :, nRun) = J; % save fitted J from end of a run for
+        % troubleshooting REndOfRun(:, :, nRun) = R; % same as above
         
         if pVar < 0
             disp('pVar < 0!')
