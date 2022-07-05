@@ -19,7 +19,7 @@ setToPlot       = 2; % only one for now - must be 2 or greater to get last trial
 
 % in and outdirs
 bd              = '~/Dropbox (BrAINY Crew)/costa_learning/';
-mouseVer        = 'BRAIN_VERSION/';
+mouseVer        = 'PINKY_VERSION/';
 mdlDir          = [bd 'models/', mouseVer];
 RNNfigdir       = [bd 'figures/', mouseVer];
 RNNSampleDir    = [mdlDir 'model_samples/'];
@@ -43,7 +43,7 @@ if setToPlot < 2
     keyboard
 end
 
-for iFile = 5 % : length(allFiles) % for each session....
+for iFile = 1% 1 : length(allFiles) % for each session....
     
     fName = allFiles(iFile).name;
     fID = fName(1:strfind(fName, '_') - 1);
@@ -349,6 +349,8 @@ for iFile = 5 % : length(allFiles) % for each session....
     DTrunc = cell2mat(DTrunc');
     DMean = cell2mat(arrayfun(@(n) mean(reshape(DTrunc(n, :), shortestTrl, size(DTrunc, 2)/shortestTrl), 2)', 1 : size(DTrunc, 1), 'un', false)');
     
+
+    
     %% get inds to order J by region
     
     % get original unit order (as trained) and reorder so within-rgn is on-diagonal and between-rgn is off-diagonal
@@ -363,6 +365,9 @@ for iFile = 5 % : length(allFiles) % for each session....
         nUnitsAll(iRgn) = nUnitsRgn;
     end
     
+    % J is reordered by region, so R_U must be as well
+    R_U_reordered = arrayfun(@(iTrl) R_U{iTrl}(newOrder, :), 1 : nTrls, 'un', 0)';
+    
     %% reorder full J and use it to get intra/inter only Js
         
     % get inds for new order by region
@@ -371,10 +376,7 @@ for iFile = 5 % : length(allFiles) % for each session....
     JLinePos = cumsum(nUnitsAll)'; % for the lines separating regions
     newRgnInds = [0, JLinePos];
     activitySampleAll = NaN(sum(nUnitsAll), nSamples, nTrls);
-    
-    % J is reordered by region, so R_U must be as well
-    R_U_reordered = arrayfun(@(iTrl) R_U{iTrl}(newOrder, :), 1 : nTrls, 'un', 0)';
-    
+        
     % get sample activvities
     for iTrl = 1 : nTrls
         sampleTimePoints = allSPTimePoints(iTrl, :);
@@ -385,6 +387,32 @@ for iFile = 5 % : length(allFiles) % for each session....
     interJOverTrls = NaN(nTrls, 1);
     intraJOverTrls = NaN(nTrls, 1);
     fullJOverTrls = NaN(nTrls, 1);
+    
+    % for pulling trials from within a fixed time duration (here, an hour,
+    % but this is hardcoded)
+    ts = trlInfo.event_times;
+    lastTrlWithinHr = find(ts(:, 4) <= ts(1, 1) + 3600, 1, 'last') - 1;
+    latestSet = setID(lastTrlWithinHr) - 1;
+    
+    % for JOverTrls subfigure showing development within sets over a fixed
+    % duration of time
+    setsToPlot = floor(linspace(2, latestSet, 5));
+    
+    % aside for plotting evolution within set - note that in 'cool' that
+    % makes blue the first and fuschia the last one!)
+    % overSetColors = winter(minTrlsPerSet + 4); % distinguishable_colors(minTrlsPerSet, 'w');
+    % overSetColors = overSetColors(3 : end - 2, :);
+    overSetColors = winter(minTrlsPerSet);
+    JTrajFig = figure('color', 'w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0 0.0275 1 0.95])
+    
+    % JFig = figure('color', 'w');
+    % set(gcf, 'units', 'normalized', 'outerposition', [0 0.25 1 0.5])
+
+    % actTrajFig = figure('color', 'w');
+    % set(gcf, 'units', 'normalized', 'outerposition', [0 0.1 1 0.85])
+
+    count2 = 0;
     
     for iSet = min(allSetIDs) : max(allSetIDs)
         
@@ -403,6 +431,8 @@ for iFile = 5 % : length(allFiles) % for each session....
         
         % reorder full J by region (includes intra and inter region)
         fullJMatTmp = fittedJMatTmp(newOrder, newOrder, :, :);
+        
+        % TO DO: HERE IS WHERE YOU GRAB THE FIRST 10 TRIALS and average
             
         % initialize submatrices
         interJMatTmp = fullJMatTmp;
@@ -425,16 +455,96 @@ for iFile = 5 % : length(allFiles) % for each session....
         
         interJOverTrls(trlIDs) = squeeze(mean(interJMatTmp, [1 2 3]));
         intraJOverTrls(trlIDs) = squeeze(mean(intraJMatTmp, [1 2 3]));
-        fullJOverTrls(trlIDs) = squeeze(mean(fullJSample, [1 2 3]));
+        fullJOverTrls(trlIDs) = squeeze(mean(fullJMatTmp, [1 2 3]));
+               
+        % want an even distribution of sets over a fixed duration of time
+        % for each subject/session
+        if ismember(iSet, setsToPlot)
+            
+            count2 = count2 + 1;
+            
+            % plot mean-subtracted J evolution over samples for first minNTrls
+            % of a set
+            meanJsOverSet = squeeze(mean(fullJMatTmp(:, :, :, 1 : minTrlsPerSet), [1 2])); % nSamples x nTrls
+            
+            % TOP ROW: plot of mean-subtracted (from start) J trajectory over first minNTrls of a set for five
+            % equally spaced sets
+            set(0, 'currentfigure', JTrajFig)
+            subplot(3, length(setsToPlot), count2),
+            jOverSetLines = plot(meanJsOverSet - meanJsOverSet(1, :), 'linewidth', 1.5, 'linestyle', '--');
+            arrayfun(@(i) set(jOverSetLines(i), 'color', overSetColors(i, :)), 1 : minTrlsPerSet)
+            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5]), xlabel('sample#')
+            line(gca, get(gca, 'xlim'), [0 0], 'linestyle', '-.', 'linewidth', 1, 'color', [0.2 0.2 0.2])
+            title(['set ', num2str(iSet)], 'fontsize', 16)
+            colAxes(1) = gca;
+            tmpAxSz = get(colAxes(1), 'OuterPosition'); set(colAxes(1), 'OuterPosition', [tmpAxSz(1:3), 1.05 * tmpAxSz(4)])
+            if count2 == 3
+                r1Title = text(colAxes(1), nSamples/2, 1.15 * colAxes(1).Title.Position(2), 'MEAN-SUBTRACTED J');
+            end
+            
+            % MIDDLE ROW: plot of mean J over first minNTrls of a set for five equally
+            % spaced sets, not mean subtracted
+            subplot(3, length(setsToPlot), count2 + length(setsToPlot)),
+            jLines = scatter(1 : minTrlsPerSet, mean(meanJsOverSet, 1), 75, overSetColors, 'filled');
+            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 minTrlsPerSet + 0.5]), xlabel('trl#')
+            jLinesSz = get(gca, 'OuterPosition');
+            set(gca, 'OuterPosition', [jLinesSz(1) 1.1 * jLinesSz(2) jLinesSz(3) 0.7 * jLinesSz(4)])
+            colAxes(2) = gca;
+            if count2 == 3
+                r2Title = text(colAxes(1), nSamples/2, 1.15 * colAxes(1).Title.Position(2), 'RAW MEAN J');
+            end
+            
+            % BOTTOM ROW: plot population mean activity evolution over samples
+            meanActOverSet = squeeze(mean(activitySample(:, :, 1 : minTrlsPerSet), 1));
+            subplot(3, length(setsToPlot), count2 + 2 * length(setsToPlot))
+            actOverSetLines = plot(meanActOverSet, 'linewidth', 1.5);
+            arrayfun(@(i) set(actOverSetLines(i), 'color', overSetColors(i, :)), 1 : minTrlsPerSet)
+            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5]), xlabel('sample#')
+            colAxes(3) = gca;
+            if count2 == 3
+                r3Title = text(colAxes(1), nSamples/2, 1.15 * colAxes(1).Title.Position(2), 'MEAN POPULATION ACTIVITY');
+            end
+            
+            % re-size axes
+            for axNum = 1 : 3
+                axSz = get(colAxes(axNum), 'OuterPosition');
+                switch count2
+                    case 1 % more to the left and wider
+                        set(colAxes(axNum), 'OuterPosition', [0.2 * axSz(1), axSz(2), 1.15 * axSz(3), axSz(4)])
+                    otherwise % just wider
+                        set(colAxes(axNum), 'OuterPosition', [axSz(1), axSz(2), 1.15 * axSz(3), axSz(4)])
+                end
+            end
+        end
         
-        save([RNNSampleDir, 'classifier_matrices_IntraOnly', monkey, ssnDate, ...
-            '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
-        
-        save([RNNSampleDir, 'classifier_matrices_InterOnly', monkey, ssnDate, ...
-            '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
-        
+%         save([RNNSampleDir, 'classifier_matrices_IntraOnly', monkey, ssnDate, ...
+%             '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
+%         
+%         save([RNNSampleDir, 'classifier_matrices_InterOnly', monkey, ssnDate, ...
+%             '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
+%         
         clear interJSample intraJSample activitySample
     end
+    
+    % re-size
+    JTrajAxes = findall(JTrajFig, 'type', 'axes');
+    newLeftPos = [repelem(0.81, 3), repelem(0.6, 3), repelem(0.4, 3), repelem(0.2, 3), repelem(0.01, 3)]';
+    allLBWH = cell2mat(get(JTrajAxes, 'OuterPosition'));
+    arrayfun(@(iAx) set(JTrajAxes(iAx), 'OuterPosition', [newLeftPos(iAx), allLBWH(iAx, 2 : end)]), 1 : length(JTrajAxes))
+    
+    % fix ylims by row
+    for iRow = 1 : 3
+        tmpYLims = cell2mat(arrayfun(@(iAx) get(JTrajAxes(iAx), 'Ylim'), iRow : 3 : length(JTrajAxes), 'un', 0)');
+        YMinRow = min(min(tmpYLims(:))); YMaxRow = max(max(tmpYLims(:)));
+        arrayfun(@(iAx) set(JTrajAxes(iAx), 'YLim', [YMinRow, YMaxRow]), iRow : 3 : length(JTrajAxes))
+    end
+    
+    if ~isfolder([RNNfigdir, 'J_and_act_over_ssn', filesep])
+        mkdir([RNNfigdir, 'J_and_act_over_ssn', filesep])
+    end
+    
+    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_J_and_act_over_ssn_', num2str(f)])
+    close
     
     
     %% check full, intra, inter
@@ -459,7 +569,7 @@ for iFile = 5 % : length(allFiles) % for each session....
         plot(fullJOverTrls(trlsToPlot), 'k', 'linewidth', 1.75)
         set(gca, 'fontweight', 'bold', 'xlim', [1 trlsPerFig])
         set(gca, 'ylim', [-2.5e-3 2.5e-3], ...
-            'xtick', floor(linspace(1, trlsPerFig, 6)), 'xticklabel', floor(linspace(trlsToPlot(1), trlsToPlot(end), 6))) 
+            'xtick', floor(linspace(1, trlsPerFig, 6)), 'xticklabel', floor(linspace(trlsToPlot(1), trlsToPlot(1) + trlsPerFig, 6))) 
         xlabel('trial#', 'fontsize', 14),
         legend(gca, {'intra', 'inter', 'full'}, 'location', 'northeast', 'autoupdate', 'off')
         
@@ -568,59 +678,64 @@ for iFile = 5 % : length(allFiles) % for each session....
 
     %% vectorized J: inter, intra TO DO 2022/01/11: CHECK IF THIS WORKS 
     
-    intraJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
-    interJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
-    fullJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
-    
+%     intraJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
+%     interJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
+%     fullJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
+%     
     % self proof
-    tmp = intraJMat(:, :, 1, 1);
-    tmpResh = reshape(tmp, 1, numel(tmp));
-    isequal(tmp, reshape(tmpResh, size(tmp)))
+%     tmp = intraJMat(:, :, 1, 1);
+%     tmpResh = reshape(tmp, 1, numel(tmp));
+%     isequal(tmp, reshape(tmpResh, size(tmp)))
     
-    for iSet = min(allSetIDs) : max(allSetIDs)
-        
-        trlIDs = find(setID == iSet);
-        
-        for iTrl = trlIDs
-            
-            intraJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
-                reshape(intraJMat(:, :, iSample, iTrl), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
-          
-            interJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
-                reshape(interJMat(:, :, iSample, iTrl), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
-          
-            fullJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
-                reshape(fullJMat(:, :, iSample, iTrl), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
-            
-%             intraJResh{iTrl} = arrayfun(@(iSample) ...
-%                 reshape(squeeze(intraJ{iTrl}(:, :, iSample)), 1, size(in_rgn, 1)^2), 1 : nSamples, 'un', false);
-%             interJResh{iTrl} = arrayfun(@(iSample) ...
-%                 reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-%             fullJResh{iTrl} = arrayfun(@(iSample) ...
-%                 reshape(squeeze(fullJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-        end
-        
-        intraJSampleResh = intraJResh(:, :, trlIDs);
-        interJSampleResh = interJResh(:, :, trlIDs);
-        trlIDsCurrSet = allTrialIDs(trlIDs);
-        activitySample = activitySampleAll(:, :, trlIDs);
-
-        save([RNNSampleDir, 'classifier_matrices_resh_IntraOnly', monkey, ssnDate, ...
-            '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
-        save([RNNSampleDir, 'classifier_matrices_resh_InterOnly', monkey, ssnDate, ...
-            '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
-        
-    end
+%     for iSet = min(allSetIDs) : max(allSetIDs)
+%         
+%         trlIDs = find(setID == iSet);
+%         
+%             intraJResh = NaN(sum(nUnitsAll)^2, nSamples, numel(trlIDs));
+%     interJResh = NaN(sum(nUnitsAll)^2, nSamples, numel(trlIDs));
+%     fullJResh = NaN(sum(nUnitsAll)^2, nSamples, numel(trlIDs));
+%     
+%         
+%         for iTrl = 1 : length(trlIDs)
+%             
+%             intraJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
+%                 reshape(intraJMat(:, :, iSample, trlIDs(iTrl)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
+%           
+%             interJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
+%                 reshape(interJMat(:, :, iSample, trlIDs(iTrl)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
+%           
+%             fullJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
+%                 reshape(fullJMat(:, :, iSample, trlIDs(iTrl)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
+%             
+% %             intraJResh{iTrl} = arrayfun(@(iSample) ...
+% %                 reshape(squeeze(intraJ{iTrl}(:, :, iSample)), 1, size(in_rgn, 1)^2), 1 : nSamples, 'un', false);
+% %             interJResh{iTrl} = arrayfun(@(iSample) ...
+% %                 reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
+% %             fullJResh{iTrl} = arrayfun(@(iSample) ...
+% %                 reshape(squeeze(fullJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
+%         end
+%         
+%         intraJSampleResh = intraJResh(:, :, trlIDs);
+%         interJSampleResh = interJResh(:, :, trlIDs);
+%         trlIDsCurrSet = allTrialIDs(trlIDs);
+%         activitySample = activitySampleAll(:, :, trlIDs);
+% 
+%         save([RNNSampleDir, 'classifier_matrices_resh_IntraOnly', monkey, ssnDate, ...
+%             '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
+%         save([RNNSampleDir, 'classifier_matrices_resh_InterOnly', monkey, ssnDate, ...
+%             '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
+%         
+%     end
 
     %%
     
-    for iTrl = 1 : nTrls
-        fullJResh{iTrl} = arrayfun(@(iSample) ...
-                reshape(squeeze(fullJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-        interJResh{iTrl} = arrayfun(@(iSample) ...
-                reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-    end
-    
+%     for iTrl = 1 : nTrls
+%         fullJResh{iTrl} = arrayfun(@(iSample) ...
+%                 reshape(squeeze(fullJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
+%         interJResh{iTrl} = arrayfun(@(iSample) ...
+%                 reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
+%     end
+%     
      %% PCA OF TRAINED MODEL ACTIVITY MATRIX
         
     % remove bad units from  activity
