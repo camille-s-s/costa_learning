@@ -43,7 +43,7 @@ if setToPlot < 2
     keyboard
 end
 
-for iFile = 1% 1 : length(allFiles) % for each session....
+for iFile = 1 % 1 : length(allFiles) % for each session....
     
     fName = allFiles(iFile).name;
     fID = fName(1:strfind(fName, '_') - 1);
@@ -225,7 +225,6 @@ for iFile = 1% 1 : length(allFiles) % for each session....
     end
     
     assert(all(arrayfun(@(t) isequal(J0_U(:,:,t+1),J_U(:,:,t)), 1 : nTrls-1)))
-
     
     %% HOUSEKEEPING: SPATIAL
     
@@ -348,9 +347,7 @@ for iFile = 1% 1 : length(allFiles) % for each session....
     DTrunc = arrayfun(@(iTrl) DTrunc{iTrl}(:, 1 : shortestTrl), 1 : nD + 1, 'un', false)';
     DTrunc = cell2mat(DTrunc');
     DMean = cell2mat(arrayfun(@(n) mean(reshape(DTrunc(n, :), shortestTrl, size(DTrunc, 2)/shortestTrl), 2)', 1 : size(DTrunc, 1), 'un', false)');
-    
 
-    
     %% get inds to order J by region
     
     % get original unit order (as trained) and reorder so within-rgn is on-diagonal and between-rgn is off-diagonal
@@ -367,7 +364,7 @@ for iFile = 1% 1 : length(allFiles) % for each session....
     
     % J is reordered by region, so R_U must be as well
     R_U_reordered = arrayfun(@(iTrl) R_U{iTrl}(newOrder, :), 1 : nTrls, 'un', 0)';
-    
+    J_U_reordered = J_U(newOrder, newOrder, :); % of note: J_U == J_S
     %% reorder full J and use it to get intra/inter only Js
         
     % get inds for new order by region
@@ -375,8 +372,12 @@ for iFile = 1% 1 : length(allFiles) % for each session....
     JLblPos = arrayfun(@(iRgn) sum(tmp(1 : iRgn-1)) + tmp(iRgn)/2, 2 : nRegions); % for the labels separating submatrices
     JLinePos = cumsum(nUnitsAll)'; % for the lines separating regions
     newRgnInds = [0, JLinePos];
-    activitySampleAll = NaN(sum(nUnitsAll), nSamples, nTrls);
-        
+    nUnits = sum(nUnitsAll);
+    activitySampleAll = NaN(nUnits, nSamples, nTrls);
+    
+    % get region labels for CURBD
+    curbdRgns = [rgns(:, 1), arrayfun(@(i) newRgnInds(i) + 1 : newRgnInds(i + 1), 1 : nRegions, 'un', 0)'];
+
     % get sample activvities
     for iTrl = 1 : nTrls
         sampleTimePoints = allSPTimePoints(iTrl, :);
@@ -388,121 +389,169 @@ for iFile = 1% 1 : length(allFiles) % for each session....
     intraJOverTrls = NaN(nTrls, 1);
     fullJOverTrls = NaN(nTrls, 1);
     
-    % for pulling trials from within a fixed time duration (here, an hour,
-    % but this is hardcoded)
+    % for pulling trials from within a fixed time duration (here, hardcoded
+    % to be 2 hours
     ts = trlInfo.event_times;
-    lastTrlWithinHr = find(ts(:, 4) <= ts(1, 1) + 3600, 1, 'last') - 1;
+    lastTrlWithinHr = find(ts(:, 4) <= ts(1, 1) + 7200, 1, 'last') - 1;
     latestSet = setID(lastTrlWithinHr) - 1;
     
     % for JOverTrls subfigure showing development within sets over a fixed
     % duration of time
     setsToPlot = floor(linspace(2, latestSet, 5));
     
-    % aside for plotting evolution within set - note that in 'cool' that
-    % makes blue the first and fuschia the last one!)
-    % overSetColors = winter(minTrlsPerSet + 4); % distinguishable_colors(minTrlsPerSet, 'w');
-    % overSetColors = overSetColors(3 : end - 2, :);
-    overSetColors = winter(minTrlsPerSet);
+    % colorschemes for plotting evolution within set
+    overSetColors = flipud(winter(minTrlsPerSet)); % earlier is green, later blue
+    overSetColors_v2 = flipud(autumn(minTrlsPerSet)); % earlier is yellow, later red
+    
     JTrajFig = figure('color', 'w');
     set(gcf, 'units', 'normalized', 'outerposition', [0 0.0275 1 0.95])
     
-    % JFig = figure('color', 'w');
-    % set(gcf, 'units', 'normalized', 'outerposition', [0 0.25 1 0.5])
-
-    % actTrajFig = figure('color', 'w');
-    % set(gcf, 'units', 'normalized', 'outerposition', [0 0.1 1 0.85])
-
+    
+    nBins = 50;
+    J_bincounts = NaN(length(setsToPlot), nBins);
+    J_edgesnew = NaN(length(setsToPlot), nBins + 1);
+    J_histcenters = NaN(length(setsToPlot), nBins);
+    
     count2 = 0;
     
-    for iSet = min(allSetIDs) : max(allSetIDs)
+    for iSet = setsToPlot % min(allSetIDs) : max(allSetIDs)
         
         trlIDs = find(setID == iSet);
-        fittedJMatTmp = NaN([fittedConsJDim, numel(trlIDs)]);
+        fittedJ_samples = NaN([fittedConsJDim, numel(trlIDs)]);
         count = 1;
         
+        % inds_sp = [];
+        % R_set = [];
+        % J_set = NaN(nUnits, nUnits, length(trlIDs));
+        tData_set = [];
+        tData_trlstart = NaN(1, length(trlIDs)); % [];
+        % inds_set = [1, NaN(1, length(trlIDs) - 1)];
+        
+        % gotta load all J samples as well as tData
         for iTrl = 1 : length(trlIDs)
             mdlfnm = dir([mdlDir, monkey, ssnDate, filesep, 'rnn_', monkey, ssnDate, '_set*_trial', num2str(trlIDs(iTrl)), '.mat']);
             tmp = load(mdlfnm.name);
-            mdl             = tmp.RNN.mdl;
-            fittedJMatTmp(:, :, :, count) =  mdl.fittedConsJ(:, :, :);
+            mdl = tmp.RNN.mdl;
+            fittedJ_samples(:, :, :, count) =  mdl.fittedConsJ(:, :, :);
+            
+            % for CURBD...
+            % J_set(:, :, count) = mdl.J;
+            % R_set = [R_set, mdl.RMdlSample];
+            tData_set = [tData_set, mdl.tData];
+            tData_trlstart(count) = mdl.tData(1); % tData_set(inds_trl) should be == to tData_trlstart
+            
+            % inds_sp = [inds_sp, mdl.sampleTimePoints + size(R_set, 2) - size(mdl.RMdlSample(newOrder, :), 2)];
+            % inds_set(count + 1) = size(R_set, 2) + 1; % inds to start of each trial in R_set
+            
             count = count + 1;
             clear mdl
         end
         
-        % reorder full J by region (includes intra and inter region)
-        fullJMatTmp = fittedJMatTmp(newOrder, newOrder, :, :);
+        R_set_dims = cell2mat(cellfun(@size, R_U_reordered(trlIDs), 'un', 0));
+        inds_set = [1; cumsum(R_set_dims(:, 2)) + 1]';
         
-        % TO DO: HERE IS WHERE YOU GRAB THE FIRST 10 TRIALS and average
-            
+        assert(isequal(tData_set(inds_set(1 : end - 1)), tData_trlstart))
+        
+        % reorder full J and R by region (includes intra and inter region)
+        fullJ_samples = fittedJ_samples(newOrder, newOrder, :, :);
+        % J_set = J_set(newOrder, newOrder, :);
+        % R_set = R_set(newOrder, :);
+        
+        % get R_set and J_set from loop in previous section
+        J_set = J_U_reordered(:, :, trlIDs);
+        R_set = cell2mat(R_U_reordered(trlIDs)');
+        
+        % define histlims for J
+        JHistMin = min(sqrt(nUnits) * J_U_reordered(:));
+        JHistMax = max(sqrt(nUnits) * J_U_reordered(:));
+        JHistEdges = linspace(floor(JHistMin), ceil(JHistMax), nBins + 1);
+        JHistCenters = JHistEdges(1 : end - 1) + (diff(JHistEdges) ./ 2); % get the centers. checked
+
+        % reshape samples for CURBD (sample)
+        fullJ_sp_resh = reshape(fullJ_samples, nUnits, nUnits, nSamples * length(trlIDs));
+        % isequal(fullJResh(:, :, nSamples + 1 : 2 * nSamples), fullJMatTmp(:, :, :, 2))
+        
+        % scratchpad goes here
+        
         % initialize submatrices
-        interJMatTmp = fullJMatTmp;
-        intraJMatTmp = zeros(size(fullJMatTmp));
+        interJ_samples = fullJ_samples;
+        intraJ_samples = zeros(size(fullJ_samples));
         
         % extract submatrices
         for iRgn = 1 : nRegions
             in_rgn = newRgnInds(iRgn) + 1 : newRgnInds(iRgn + 1);
-            interJMatTmp(in_rgn, in_rgn, :, :) = 0; % set intrargn values to zero
-            intraJMatTmp(in_rgn, in_rgn, :, :) = fullJMatTmp(in_rgn, in_rgn, :, :); % pull only intrargn values
+            interJ_samples(in_rgn, in_rgn, :, :) = 0; % set intrargn values to zero
+            intraJ_samples(in_rgn, in_rgn, :, :) = fullJ_samples(in_rgn, in_rgn, :, :); % pull only intrargn values
         end
 
-        
-        % reorder
-        interJSample = interJMatTmp; %(:, :, :, trlIDs);
-        intraJSample = intraJMatTmp; %(:, :, :, trlIDs);
-        fullJSample = fullJMatTmp; %(:, :, :, trlIDs);
+        % grab vals of interest
         trlIDsCurrSet = allTrialIDs(trlIDs);
         activitySample = activitySampleAll(:, :, trlIDs);
+        interJOverTrls(trlIDs) = squeeze(mean(interJ_samples, [1 2 3]));
+        intraJOverTrls(trlIDs) = squeeze(mean(intraJ_samples, [1 2 3]));
+        fullJOverTrls(trlIDs) = squeeze(mean(fullJ_samples, [1 2 3]));
         
-        interJOverTrls(trlIDs) = squeeze(mean(interJMatTmp, [1 2 3]));
-        intraJOverTrls(trlIDs) = squeeze(mean(intraJMatTmp, [1 2 3]));
-        fullJOverTrls(trlIDs) = squeeze(mean(fullJMatTmp, [1 2 3]));
-               
         % want an even distribution of sets over a fixed duration of time
         % for each subject/session
         if ismember(iSet, setsToPlot)
             
             count2 = count2 + 1;
             
+            % plot of trial-averaged (within this set) fitted Js from the
+            % last samplepoint in each trial
+            % for J_source_to_target: reshape(sqrt(nSource) * J, nSource * nTarget, 1)           
+            J_mean = mean(J_set(:, :, 1 : minTrlsPerSet), 3);
+            reshaped_J_mean = reshape(sqrt(nUnits) * J_mean, nUnits .^ 2, 1);
+            [J_bincounts(count2, :)] = histcounts(reshaped_J_mean, JHistEdges); % TO DO: look at it with hist and see
+
             % plot mean-subtracted J evolution over samples for first minNTrls
             % of a set
-            meanJsOverSet = squeeze(mean(fullJMatTmp(:, :, :, 1 : minTrlsPerSet), [1 2])); % nSamples x nTrls
+            meanJsOverSet = squeeze(mean(fullJ_samples(:, :, :, 1 : minTrlsPerSet), [1 2])); % nSamples x nTrls
             
             % TOP ROW: plot of mean-subtracted (from start) J trajectory over first minNTrls of a set for five
             % equally spaced sets
             set(0, 'currentfigure', JTrajFig)
             subplot(3, length(setsToPlot), count2),
-            jOverSetLines = plot(meanJsOverSet - meanJsOverSet(1, :), 'linewidth', 1.5, 'linestyle', '--');
+            jOverSetLines = plot(meanJsOverSet - meanJsOverSet(1, :), 'linewidth', 1.75, 'linestyle', '-'); 
             arrayfun(@(i) set(jOverSetLines(i), 'color', overSetColors(i, :)), 1 : minTrlsPerSet)
-            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5]), xlabel('sample#')
-            line(gca, get(gca, 'xlim'), [0 0], 'linestyle', '-.', 'linewidth', 1, 'color', [0.2 0.2 0.2])
-            title(['set ', num2str(iSet)], 'fontsize', 16)
+            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5], 'xtick', 1 : 4 : nSamples, 'xticklabel', 1 : 4 : nSamples),
+            xlabel('sample#')
+            line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', [0.2 0.2 0.2])
+            title(['set ', num2str(iSet)], 'fontsize', 15)
             colAxes(1) = gca;
-            tmpAxSz = get(colAxes(1), 'OuterPosition'); set(colAxes(1), 'OuterPosition', [tmpAxSz(1:3), 1.05 * tmpAxSz(4)])
+            tmpAxSz = get(colAxes(1), 'OuterPosition');
+            set(colAxes(1), 'OuterPosition', [tmpAxSz(1), 0.9 * tmpAxSz(2), tmpAxSz(3), 1.18 * tmpAxSz(4)]) % H = 1.15
             if count2 == 3
-                r1Title = text(colAxes(1), nSamples/2, 1.15 * colAxes(1).Title.Position(2), 'MEAN-SUBTRACTED J');
+                rTitle(3) = text(colAxes(1), 3, 1.15 * colAxes(1).Title.Position(2), 'MEAN-SUBTRACTED J', 'fontweight', 'bold', 'fontsize', 18);
+            end
+            if count2 == 1
+                figTitle = text(colAxes(1), -1, 1.25 * colAxes(1).Title.Position(2), [monkey, ssnDate], 'fontweight', 'bold', 'fontsize', 20);
             end
             
             % MIDDLE ROW: plot of mean J over first minNTrls of a set for five equally
             % spaced sets, not mean subtracted
             subplot(3, length(setsToPlot), count2 + length(setsToPlot)),
-            jLines = scatter(1 : minTrlsPerSet, mean(meanJsOverSet, 1), 75, overSetColors, 'filled');
-            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 minTrlsPerSet + 0.5]), xlabel('trl#')
+            jLines = scatter(1 : minTrlsPerSet, mean(meanJsOverSet, 1), 75, overSetColors, 'filled', 'markeredgecolor', 'k'); grid minor; box on;
+            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 minTrlsPerSet + 0.5], 'xtick', 1 : 8, 'xticklabel', 1 : 8), xlabel('trl#')
             jLinesSz = get(gca, 'OuterPosition');
-            set(gca, 'OuterPosition', [jLinesSz(1) 1.1 * jLinesSz(2) jLinesSz(3) 0.7 * jLinesSz(4)])
+            set(gca, 'OuterPosition', [jLinesSz(1:3) 0.7 * jLinesSz(4)])
             colAxes(2) = gca;
             if count2 == 3
-                r2Title = text(colAxes(1), nSamples/2, 1.15 * colAxes(1).Title.Position(2), 'RAW MEAN J');
+                rTitle(2) = text(colAxes(2), 3, 1.15 * colAxes(2).Title.Position(2), 'RAW MEAN J', 'fontweight', 'bold', 'fontsize', 18);
             end
             
             % BOTTOM ROW: plot population mean activity evolution over samples
             meanActOverSet = squeeze(mean(activitySample(:, :, 1 : minTrlsPerSet), 1));
             subplot(3, length(setsToPlot), count2 + 2 * length(setsToPlot))
-            actOverSetLines = plot(meanActOverSet, 'linewidth', 1.5);
-            arrayfun(@(i) set(actOverSetLines(i), 'color', overSetColors(i, :)), 1 : minTrlsPerSet)
-            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5]), xlabel('sample#')
+            actOverSetLines = plot(meanActOverSet, 'linewidth', 1.75, 'linestyle', '-');
+            arrayfun(@(i) set(actOverSetLines(i), 'color', overSetColors_v2(i, :)), 1 : minTrlsPerSet)
+            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5], 'xtick', 1 : 4 : nSamples, 'xticklabel', 1 : 4 : nSamples),
+            xlabel('sample#')
             colAxes(3) = gca;
+            tmpAxSz = get(colAxes(3), 'OuterPosition');
+            set(colAxes(3), 'OuterPosition', [tmpAxSz(1), 0.55 * tmpAxSz(2), tmpAxSz(3), 1.15 * tmpAxSz(4)]) % H = 1.1
             if count2 == 3
-                r3Title = text(colAxes(1), nSamples/2, 1.15 * colAxes(1).Title.Position(2), 'MEAN POPULATION ACTIVITY');
+                rTitle(1) = text(colAxes(3), 0, 1.14 * colAxes(3).Title.Position(2), 'MEAN POPULATION ACTIVITY', 'fontweight', 'bold', 'fontsize', 18);
             end
             
             % re-size axes
@@ -518,34 +567,63 @@ for iFile = 1% 1 : length(allFiles) % for each session....
         end
         
 %         save([RNNSampleDir, 'classifier_matrices_IntraOnly', monkey, ssnDate, ...
-%             '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
+%             '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJ_samples', 'trlIDsCurrSet', 'iSet', '-v7.3')
 %         
 %         save([RNNSampleDir, 'classifier_matrices_InterOnly', monkey, ssnDate, ...
-%             '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
+%             '_set', num2str(iSet), '.mat'], 'activitySample', 'interJ_samples', 'trlIDsCurrSet', 'iSet', '-v7.3')
 %         
         clear interJSample intraJSample activitySample
     end
     
+    
+    %J_AND_ACT_OVER_SSN FORMATTING
     % re-size
     JTrajAxes = findall(JTrajFig, 'type', 'axes');
-    newLeftPos = [repelem(0.81, 3), repelem(0.6, 3), repelem(0.4, 3), repelem(0.2, 3), repelem(0.01, 3)]';
+    newLeftPos = [repelem(0.81, 3), repelem(0.61, 3), repelem(0.41, 3), repelem(0.21, 3), repelem(0.01, 3)]';
     allLBWH = cell2mat(get(JTrajAxes, 'OuterPosition'));
     arrayfun(@(iAx) set(JTrajAxes(iAx), 'OuterPosition', [newLeftPos(iAx), allLBWH(iAx, 2 : end)]), 1 : length(JTrajAxes))
     
     % fix ylims by row
+    iRowMultip = [0.06, 0.2, 0.18];
+    iRowYLims = [0.02 0.06; -5e-4 20e-4; -1e-6 1e-6];
+    
     for iRow = 1 : 3
         tmpYLims = cell2mat(arrayfun(@(iAx) get(JTrajAxes(iAx), 'Ylim'), iRow : 3 : length(JTrajAxes), 'un', 0)');
-        YMinRow = min(min(tmpYLims(:))); YMaxRow = max(max(tmpYLims(:)));
+        YMinRow = iRowYLims(iRow, 1); YMaxRow = iRowYLims(iRow, 2);
         arrayfun(@(iAx) set(JTrajAxes(iAx), 'YLim', [YMinRow, YMaxRow]), iRow : 3 : length(JTrajAxes))
+        
+        % re-position titles
+        oldRowTitlePos = get(rTitle(iRow), 'Position');
+        newRowTitleYPos = iRowMultip(iRow) * (abs(YMinRow) + abs(YMaxRow)) + YMaxRow;
+        set(rTitle(iRow), 'Position', [oldRowTitlePos(1), newRowTitleYPos, 0])
+        
+        if iRow == 3
+            oldFigTitlePos = get(figTitle, 'Position');
+            set(figTitle, 'Position', [oldFigTitlePos(1), newRowTitleYPos, 0])
+        end
     end
     
     if ~isfolder([RNNfigdir, 'J_and_act_over_ssn', filesep])
         mkdir([RNNfigdir, 'J_and_act_over_ssn', filesep])
     end
     
-    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_J_and_act_over_ssn_', num2str(f)])
+    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_J_and_act_over_ssn'])
     close
     
+    % TRIAL-AVERAGED J HISTOGRAMS RE-FORMATTING
+    overSsnColors = flipud(spring(length(setsToPlot))); % earlier is yellow, later is pink
+    histFig = figure('color', 'w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0 0.0275 1 0.95])
+        if exist('colororder','file') ~= 0
+        colororder(overSsnColors);
+    end
+    
+    
+    subplot(2, 1, 1),
+    
+    % normalizing each by area under curve
+    jHist = semilogy(JHistCenters, J_bincounts ./ sum(J_bincounts, 2), 'o-', 'linewidth', 0.8, 'markersize', 1.5);
+    set(gca, 'fontsize', 6, 'ylim', [0 1], 'xlim', hist_xlims)
     
     %% check full, intra, inter
     
@@ -988,13 +1066,13 @@ for iFile = 1% 1 : length(allFiles) % for each session....
     
     % plot histograms of Js
     figure,
-    [bincounts,edgesnew] = histcounts(meanJOverLastTrlFirstSetPlot, 75);
+    [J_bincounts,edgesnew] = histcounts(meanJOverLastTrlFirstSetPlot, 75);
     histcenters = edgesnew(1:end-1) + (diff(edgesnew) ./ 2);
     % normalizing each by area under curve
-    semilogy(histcenters,bincounts./sum(bincounts), 'o-', 'color', [0.12, 0.56, 1], 'linewidth', 1.5, 'markersize', 1.5)
-    [bincounts,edgesnew] = histcounts(meanJOverLastTrlLastSetPlot, 75);
+    semilogy(histcenters,J_bincounts./sum(J_bincounts), 'o-', 'color', [0.12, 0.56, 1], 'linewidth', 1.5, 'markersize', 1.5)
+    [J_bincounts,edgesnew] = histcounts(meanJOverLastTrlLastSetPlot, 75);
     histcenters = edgesnew(1:end-1) + (diff(edgesnew) ./ 2);
-    hold on, semilogy(histcenters,bincounts./sum(bincounts), 'o-', 'color', [0 0 1], 'linewidth', 1.5, 'markersize', 1.5)
+    hold on, semilogy(histcenters,J_bincounts./sum(J_bincounts), 'o-', 'color', [0 0 1], 'linewidth', 1.5, 'markersize', 1.5)
     set(gca, 'fontsize', 13, 'ylim', [0.0001 1], 'xlim', [-20 20])
     xlabel('Weight')
     ylabel('Density')
