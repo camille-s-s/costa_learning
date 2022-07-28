@@ -365,6 +365,7 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     % J is reordered by region, so R_U must be as well
     R_U_reordered = arrayfun(@(iTrl) R_U{iTrl}(newOrder, :), 1 : nTrls, 'un', 0)';
     J_U_reordered = J_U(newOrder, newOrder, :); % of note: J_U == J_S
+    
     %% reorder full J and use it to get intra/inter only Js
         
     % get inds for new order by region
@@ -395,22 +396,109 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     lastTrlWithinHr = find(ts(:, 4) <= ts(1, 1) + 7200, 1, 'last') - 1;
     latestSet = setID(lastTrlWithinHr) - 1;
     
-    % for JOverTrls subfigure showing development within sets over a fixed
-    % duration of time
+    % set up subsampling/plotsof J, R, CURBD over a fixed duration and number of trials (fixed across monkeys and recording days) 
     setsToPlot = floor(linspace(2, latestSet, 5));
+    allTrlIDs = cell2mat(arrayfun(@(iSet) find(setID == iSet, minTrlsPerSet), setsToPlot, 'un', 0)');
+    J_allsets = J_U_reordered(:, :, allTrlIDs);
+    R_allsets_trunc_cell = arrayfun(@(iTrl) R_U_reordered{iTrl}(:, 1 : shortestTrl), allTrlIDs, 'un', 0);
+    R_allsets_trunc_mat = cat(3, R_allsets_trunc_cell{:});
+    
+    % define histlims for J and R
+    nBins = 50;
+    
+    JAllHistMin = min(sqrt(nUnits) * J_allsets(:));
+    JAllHistMax = max(sqrt(nUnits) * J_allsets(:));
+    JAllHistEdges = linspace(floor(JAllHistMin), ceil(JAllHistMax), nBins + 1);
+    JAllHistCenters = JAllHistEdges(1 : end - 1) + (diff(JAllHistEdges) ./ 2); % get the centers. checked
+    reshaped_J_allsets_mean = reshape(sqrt(nUnits) * mean(J_allsets, 3), nUnits .^ 2, 1);
+    JAllHistCounts = histcounts(reshaped_J_allsets_mean, JAllHistEdges); % TO DO: look at it with hist and see
+    
+    RXLims = prctile(R_allsets_trunc_mat(:), [1 99]);
+    RAllHistEdges = linspace(RXLims(1), RXLims(2),  nBins + 1);
+    RAllHistCenters = RAllHistEdges(1 : end - 1) + (diff(RAllHistEdges) ./ 2);
+    RAllHistCounts = histcounts(mean(R_allsets_trunc_mat, 3), RAllHistEdges);
+    
+    % TRIAL-AVERAGED OVER ALL SUBSAMPLED TRIALS: J and R HISTS
+    figure('color', 'w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0.2 0 0.4 1])
+    
+    subplot(2, 1, 1),
+    semilogy(JAllHistCenters, JAllHistCounts ./ sum(JAllHistCounts, 2), 'o-', 'linewidth', 1.75, 'markersize', 7);
+    set(gca, 'fontsize', 14, 'fontweight', 'bold', 'ylim', [0 1], 'xlim', [-40 40]), 
+    xlabel(gca, 'weight'), ylabel(gca, 'log density')
+    title(['[', monkey, ssnDate, '] trial-averaged J over subsampled trials'], 'fontweight', 'bold')
+    % legend(gca, cellstr([repmat('set ', length(setsToPlot), 1), num2str(setsToPlot')]), 'location', 'northeastoutside')
+    
+    subplot(2, 1, 2),
+    semilogy(RAllHistCenters, RAllHistCounts ./ sum(RAllHistCounts, 2), 'o-', 'linewidth', 1.75, 'markersize', 7);
+    set(gca, 'fontsize', 14, 'fontweight', 'bold', 'ylim', [0 1], 'xlim', RXLims), 
+    xlabel(gca, 'activation'), ylabel(gca, 'log density')
+    title(['[', monkey, ssnDate, '] trial-averaged R over subsampled trials'], 'fontweight', 'bold')
+    % legend(gca, cellstr([repmat('set ', length(setsToPlot), 1), num2str(setsToPlot')]), 'location', 'northeastoutside')
+    
+    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, 'J_and_act_trl_avgd'])
+    close
+    
+    % TRIAL-AVERAGED OVER ALL SUBSAMPLED TRIALS: CURBD
+    R_allsets_trunc = cell2mat(R_allsets_trunc_cell');
+    inds_allsets_trunc = [1; cumsum(repmat(shortestTrl, length(allTrlIDs), 1)) + 1]';
+    [CURBD_allsets, avgCURBD_allsets, curbdRgns, nRegionsCURBD] = costaCURBD(J_allsets, R_allsets_trunc, inds_allsets_trunc, curbdRgns, minTrlsPerSet * length(setsToPlot));
+    avgCURBD_resh = reshape(avgCURBD_allsets, nRegionsCURBD .^ 2, 1); % for getting YLims
+    avgCURBD_mean = cell2mat(arrayfun(@(i) mean(avgCURBD_resh{i}, 1), 1 : nRegionsCURBD^2, 'un', 0)');
+    CURBDXLims = prctile(avgCURBD_mean(:), [1 99]);
+    
+    % TRIAL-AVERAGED CURBD PLOT
+    % plot means of currents
+    figure('color', 'w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0.0275 0.0275 0.95 0.95])
+    count = 1;
+    xTks = round(linspace(1, shortestTrl, 5)); % these will be trial averaged sample points
+    
+    for iTarget = 1 : nRegionsCURBD
+        nUnitsTarget = numel(curbdRgns{iTarget, 2});
+        
+        for iSource = 1 : nRegionsCURBD
+            
+            subplot(nRegionsCURBD, nRegionsCURBD, count);
+            hold all;
+            count = count + 1;
+            
+            plot(1 : shortestTrl, mean(avgCURBD_allsets{iTarget, iSource}, 1), 'linewidth', 1.5, 'color', 'k')
+            line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', [0.2 0.2 0.2])
+            
+            axis tight;
+            set(gca, 'ylim', CURBDXLims, 'box', 'off', 'tickdir', 'out', 'fontsize', 11)
+            set(gca, 'xtick', xTks, 'xticklabel', num2str([(xTks * dtData) - dtData]', '%.1f'), 'yticklabel', '')
+            
+            if iTarget == size(CURBD, 1) && iSource == 1
+                xlabel('time (s)', 'fontweight', 'bold');
+            end
+            
+            if iSource == 1
+                ylabel([curbdRgns{iTarget, 1}(1 : end - 3), '(', num2str(nUnitsTarget), ')'], 'fontweight', 'bold');
+            end
+            
+            title([curbdRgns{iSource, 1}(1 : end - 3), ' > ', curbdRgns{iTarget, 1}(1 : end - 3)], 'fontweight', 'bold');
+        end
+    end
+    
+    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, 'CURBD_trl_avgd'])
+    close
+    
+    % OVER SET HISTS: set up histogram plotting
+    JHistCounts = NaN(length(setsToPlot), nBins);
+    RHistCounts = NaN(length(setsToPlot), nBins);
     
     % colorschemes for plotting evolution within set
     overSetColors = flipud(winter(minTrlsPerSet)); % earlier is green, later blue
     overSetColors_v2 = flipud(autumn(minTrlsPerSet)); % earlier is yellow, later red
-    
+    overSsnColors = flipud(winter(length(setsToPlot))); % earlier is green, later blue% flipud(spring(length(setsToPlot))); % earlier is yellow, later is pink
+
     JTrajFig = figure('color', 'w');
     set(gcf, 'units', 'normalized', 'outerposition', [0 0.0275 1 0.95])
-    
-    
-    nBins = 50;
-    J_bincounts = NaN(length(setsToPlot), nBins);
-    J_edgesnew = NaN(length(setsToPlot), nBins + 1);
-    J_histcenters = NaN(length(setsToPlot), nBins);
+      
+    % R_start_ts = NaN(1, numel(setsToPlot));
+    avgCURBD_set = cell(1, numel(setsToPlot));
     
     count2 = 0;
     
@@ -420,12 +508,9 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
         fittedJ_samples = NaN([fittedConsJDim, numel(trlIDs)]);
         count = 1;
         
-        % inds_sp = [];
-        % R_set = [];
-        % J_set = NaN(nUnits, nUnits, length(trlIDs));
         tData_set = [];
+        % tData_set_trunc = [];
         tData_trlstart = NaN(1, length(trlIDs)); % [];
-        % inds_set = [1, NaN(1, length(trlIDs) - 1)];
         
         % gotta load all J samples as well as tData
         for iTrl = 1 : length(trlIDs)
@@ -435,14 +520,9 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
             fittedJ_samples(:, :, :, count) =  mdl.fittedConsJ(:, :, :);
             
             % for CURBD...
-            % J_set(:, :, count) = mdl.J;
-            % R_set = [R_set, mdl.RMdlSample];
             tData_set = [tData_set, mdl.tData];
+            % tData_set_trunc = [tData_set_trunc, mdl.tData(1 : shortestTrl)];
             tData_trlstart(count) = mdl.tData(1); % tData_set(inds_trl) should be == to tData_trlstart
-            
-            % inds_sp = [inds_sp, mdl.sampleTimePoints + size(R_set, 2) - size(mdl.RMdlSample(newOrder, :), 2)];
-            % inds_set(count + 1) = size(R_set, 2) + 1; % inds to start of each trial in R_set
-            
             count = count + 1;
             clear mdl
         end
@@ -454,24 +534,24 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
         
         % reorder full J and R by region (includes intra and inter region)
         fullJ_samples = fittedJ_samples(newOrder, newOrder, :, :);
-        % J_set = J_set(newOrder, newOrder, :);
-        % R_set = R_set(newOrder, :);
-        
+                
         % get R_set and J_set from loop in previous section
         J_set = J_U_reordered(:, :, trlIDs);
         R_set = cell2mat(R_U_reordered(trlIDs)');
         
-        % define histlims for J
-        JHistMin = min(sqrt(nUnits) * J_U_reordered(:));
-        JHistMax = max(sqrt(nUnits) * J_U_reordered(:));
-        JHistEdges = linspace(floor(JHistMin), ceil(JHistMax), nBins + 1);
-        JHistCenters = JHistEdges(1 : end - 1) + (diff(JHistEdges) ./ 2); % get the centers. checked
-
+       % get same trials from same sets, but trim down to shortest trial so you can trial average later... 
+       R_set_trunc_cell = arrayfun(@(iTrl) R_U_reordered{iTrl}(:, 1 : shortestTrl), trlIDs, 'un', 0);
+       R_set_trunc_mat = cat(3, R_set_trunc_cell{:}); % isequal(R_set_trunc_cell{3}, squeeze(R_set_trunc_mat(:, :, 3)))
+       R_set_trunc = cell2mat(R_set_trunc_cell');
+       inds_set_trunc = [1; cumsum(repmat(shortestTrl, length(trlIDs), 1)) + 1]';
+       
+       % CURBD that bitch
+       % costaCURBD(J_set, R_set, inds_set, curbdRgns, minTrlsPerSet, tData_set)        
+       [CURBD, avgCURBD, curbdRgns, nRegionsCURBD] = costaCURBD(J_set, R_set_trunc, inds_set_trunc, curbdRgns, minTrlsPerSet);        
+               
         % reshape samples for CURBD (sample)
-        fullJ_sp_resh = reshape(fullJ_samples, nUnits, nUnits, nSamples * length(trlIDs));
+        % fullJ_sp_resh = reshape(fullJ_samples, nUnits, nUnits, nSamples * length(trlIDs));
         % isequal(fullJResh(:, :, nSamples + 1 : 2 * nSamples), fullJMatTmp(:, :, :, 2))
-        
-        % scratchpad goes here
         
         % initialize submatrices
         interJ_samples = fullJ_samples;
@@ -483,7 +563,7 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
             interJ_samples(in_rgn, in_rgn, :, :) = 0; % set intrargn values to zero
             intraJ_samples(in_rgn, in_rgn, :, :) = fullJ_samples(in_rgn, in_rgn, :, :); % pull only intrargn values
         end
-
+        
         % grab vals of interest
         trlIDsCurrSet = allTrialIDs(trlIDs);
         activitySample = activitySampleAll(:, :, trlIDs);
@@ -497,73 +577,83 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
             
             count2 = count2 + 1;
             
+            avgCURBD_set(count2) = {avgCURBD}; % collect into cell for later plotting of CURBD
+
+            % R_start_ts(count2) = tData_set(1); % time stamps for start of first trial of each set
+            
+            % get trial averaged truncated activity from minTrlsPerSet for
+            % setsToPlot
+            R_mean = mean(R_set_trunc_mat(:, :, 1 : minTrlsPerSet), 3);
+            RHistCounts(count2, :) = histcounts(R_mean, RAllHistEdges);
+            
             % plot of trial-averaged (within this set) fitted Js from the
             % last samplepoint in each trial
-            % for J_source_to_target: reshape(sqrt(nSource) * J, nSource * nTarget, 1)           
+            % for J_source_to_target: reshape(sqrt(nSource) * J, nSource * nTarget, 1)
             J_mean = mean(J_set(:, :, 1 : minTrlsPerSet), 3);
             reshaped_J_mean = reshape(sqrt(nUnits) * J_mean, nUnits .^ 2, 1);
-            [J_bincounts(count2, :)] = histcounts(reshaped_J_mean, JHistEdges); % TO DO: look at it with hist and see
-
-            % plot mean-subtracted J evolution over samples for first minNTrls
-            % of a set
-            meanJsOverSet = squeeze(mean(fullJ_samples(:, :, :, 1 : minTrlsPerSet), [1 2])); % nSamples x nTrls
+            [JHistCounts(count2, :)] = histcounts(reshaped_J_mean, JAllHistEdges); % TO DO: look at it with hist and see
             
-            % TOP ROW: plot of mean-subtracted (from start) J trajectory over first minNTrls of a set for five
-            % equally spaced sets
-            set(0, 'currentfigure', JTrajFig)
-            subplot(3, length(setsToPlot), count2),
-            jOverSetLines = plot(meanJsOverSet - meanJsOverSet(1, :), 'linewidth', 1.75, 'linestyle', '-'); 
-            arrayfun(@(i) set(jOverSetLines(i), 'color', overSetColors(i, :)), 1 : minTrlsPerSet)
-            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5], 'xtick', 1 : 4 : nSamples, 'xticklabel', 1 : 4 : nSamples),
-            xlabel('sample#')
-            line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', [0.2 0.2 0.2])
-            title(['set ', num2str(iSet)], 'fontsize', 15)
-            colAxes(1) = gca;
-            tmpAxSz = get(colAxes(1), 'OuterPosition');
-            set(colAxes(1), 'OuterPosition', [tmpAxSz(1), 0.9 * tmpAxSz(2), tmpAxSz(3), 1.18 * tmpAxSz(4)]) % H = 1.15
-            if count2 == 3
-                rTitle(3) = text(colAxes(1), 3, 1.15 * colAxes(1).Title.Position(2), 'MEAN-SUBTRACTED J', 'fontweight', 'bold', 'fontsize', 18);
-            end
-            if count2 == 1
-                figTitle = text(colAxes(1), -1, 1.25 * colAxes(1).Title.Position(2), [monkey, ssnDate], 'fontweight', 'bold', 'fontsize', 20);
-            end
-            
-            % MIDDLE ROW: plot of mean J over first minNTrls of a set for five equally
-            % spaced sets, not mean subtracted
-            subplot(3, length(setsToPlot), count2 + length(setsToPlot)),
-            jLines = scatter(1 : minTrlsPerSet, mean(meanJsOverSet, 1), 75, overSetColors, 'filled', 'markeredgecolor', 'k'); grid minor; box on;
-            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 minTrlsPerSet + 0.5], 'xtick', 1 : 8, 'xticklabel', 1 : 8), xlabel('trl#')
-            jLinesSz = get(gca, 'OuterPosition');
-            set(gca, 'OuterPosition', [jLinesSz(1:3) 0.7 * jLinesSz(4)])
-            colAxes(2) = gca;
-            if count2 == 3
-                rTitle(2) = text(colAxes(2), 3, 1.15 * colAxes(2).Title.Position(2), 'RAW MEAN J', 'fontweight', 'bold', 'fontsize', 18);
-            end
-            
-            % BOTTOM ROW: plot population mean activity evolution over samples
-            meanActOverSet = squeeze(mean(activitySample(:, :, 1 : minTrlsPerSet), 1));
-            subplot(3, length(setsToPlot), count2 + 2 * length(setsToPlot))
-            actOverSetLines = plot(meanActOverSet, 'linewidth', 1.75, 'linestyle', '-');
-            arrayfun(@(i) set(actOverSetLines(i), 'color', overSetColors_v2(i, :)), 1 : minTrlsPerSet)
-            set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5], 'xtick', 1 : 4 : nSamples, 'xticklabel', 1 : 4 : nSamples),
-            xlabel('sample#')
-            colAxes(3) = gca;
-            tmpAxSz = get(colAxes(3), 'OuterPosition');
-            set(colAxes(3), 'OuterPosition', [tmpAxSz(1), 0.55 * tmpAxSz(2), tmpAxSz(3), 1.15 * tmpAxSz(4)]) % H = 1.1
-            if count2 == 3
-                rTitle(1) = text(colAxes(3), 0, 1.14 * colAxes(3).Title.Position(2), 'MEAN POPULATION ACTIVITY', 'fontweight', 'bold', 'fontsize', 18);
-            end
-            
-            % re-size axes
-            for axNum = 1 : 3
-                axSz = get(colAxes(axNum), 'OuterPosition');
-                switch count2
-                    case 1 % more to the left and wider
-                        set(colAxes(axNum), 'OuterPosition', [0.2 * axSz(1), axSz(2), 1.15 * axSz(3), axSz(4)])
-                    otherwise % just wider
-                        set(colAxes(axNum), 'OuterPosition', [axSz(1), axSz(2), 1.15 * axSz(3), axSz(4)])
-                end
-            end
+            % MORE GRANULAR FIGURE!
+%             % plot mean-subtracted J evolution over samples for first minNTrls
+%             % of a set
+%             meanJsOverSet = squeeze(mean(fullJ_samples(:, :, :, 1 : minTrlsPerSet), [1 2])); % nSamples x nTrls
+%             
+%             % TOP ROW: plot of mean-subtracted (from start) J trajectory over first minNTrls of a set for five
+%             % equally spaced sets
+%             set(0, 'currentfigure', JTrajFig)
+%             subplot(3, length(setsToPlot), count2),
+%             jOverSetLines = plot(meanJsOverSet - meanJsOverSet(1, :), 'linewidth', 1.75, 'linestyle', '-'); 
+%             arrayfun(@(i) set(jOverSetLines(i), 'color', overSetColors(i, :)), 1 : minTrlsPerSet)
+%             set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5], 'xtick', 1 : 4 : nSamples, 'xticklabel', 1 : 4 : nSamples),
+%             xlabel('sample#')
+%             line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', [0.2 0.2 0.2])
+%             title(['set ', num2str(iSet)], 'fontsize', 15)
+%             colAxes(1) = gca;
+%             tmpAxSz = get(colAxes(1), 'OuterPosition');
+%             set(colAxes(1), 'OuterPosition', [tmpAxSz(1), 0.9 * tmpAxSz(2), tmpAxSz(3), 1.18 * tmpAxSz(4)]) % H = 1.15
+%             if count2 == 3
+%                 rTitle(3) = text(colAxes(1), 3, 1.15 * colAxes(1).Title.Position(2), 'MEAN-SUBTRACTED J', 'fontweight', 'bold', 'fontsize', 18);
+%             end
+%             if count2 == 1
+%                 figTitle = text(colAxes(1), -1, 1.25 * colAxes(1).Title.Position(2), [monkey, ssnDate], 'fontweight', 'bold', 'fontsize', 20);
+%             end
+%             
+%             % MIDDLE ROW: plot of mean J over first minNTrls of a set for five equally
+%             % spaced sets, not mean subtracted
+%             subplot(3, length(setsToPlot), count2 + length(setsToPlot)),
+%             jLines = scatter(1 : minTrlsPerSet, mean(meanJsOverSet, 1), 75, overSetColors, 'filled', 'markeredgecolor', 'k'); grid minor; box on;
+%             set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 minTrlsPerSet + 0.5], 'xtick', 1 : 8, 'xticklabel', 1 : 8), xlabel('trl#')
+%             jLinesSz = get(gca, 'OuterPosition');
+%             set(gca, 'OuterPosition', [jLinesSz(1:3) 0.7 * jLinesSz(4)])
+%             colAxes(2) = gca;
+%             if count2 == 3
+%                 rTitle(2) = text(colAxes(2), 3, 1.15 * colAxes(2).Title.Position(2), 'RAW MEAN J', 'fontweight', 'bold', 'fontsize', 18);
+%             end
+%             
+%             % BOTTOM ROW: plot population mean activity evolution over samples
+%             meanActOverSet = squeeze(mean(activitySample(:, :, 1 : minTrlsPerSet), 1));
+%             subplot(3, length(setsToPlot), count2 + 2 * length(setsToPlot))
+%             actOverSetLines = plot(meanActOverSet, 'linewidth', 1.75, 'linestyle', '-');
+%             arrayfun(@(i) set(actOverSetLines(i), 'color', overSetColors_v2(i, :)), 1 : minTrlsPerSet)
+%             set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5], 'xtick', 1 : 4 : nSamples, 'xticklabel', 1 : 4 : nSamples),
+%             xlabel('sample#')
+%             colAxes(3) = gca;
+%             tmpAxSz = get(colAxes(3), 'OuterPosition');
+%             set(colAxes(3), 'OuterPosition', [tmpAxSz(1), 0.55 * tmpAxSz(2), tmpAxSz(3), 1.15 * tmpAxSz(4)]) % H = 1.1
+%             if count2 == 3
+%                 rTitle(1) = text(colAxes(3), 0, 1.14 * colAxes(3).Title.Position(2), 'MEAN POPULATION ACTIVITY', 'fontweight', 'bold', 'fontsize', 18);
+%             end
+%             
+%             % re-size axes
+%             for axNum = 1 : 3
+%                 axSz = get(colAxes(axNum), 'OuterPosition');
+%                 switch count2
+%                     case 1 % more to the left and wider
+%                         set(colAxes(axNum), 'OuterPosition', [0.2 * axSz(1), axSz(2), 1.15 * axSz(3), axSz(4)])
+%                     otherwise % just wider
+%                         set(colAxes(axNum), 'OuterPosition', [axSz(1), axSz(2), 1.15 * axSz(3), axSz(4)])
+%                 end
+%             end
         end
         
 %         save([RNNSampleDir, 'classifier_matrices_IntraOnly', monkey, ssnDate, ...
@@ -576,54 +666,109 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     end
     
     
-    %J_AND_ACT_OVER_SSN FORMATTING
-    % re-size
-    JTrajAxes = findall(JTrajFig, 'type', 'axes');
-    newLeftPos = [repelem(0.81, 3), repelem(0.61, 3), repelem(0.41, 3), repelem(0.21, 3), repelem(0.01, 3)]';
-    allLBWH = cell2mat(get(JTrajAxes, 'OuterPosition'));
-    arrayfun(@(iAx) set(JTrajAxes(iAx), 'OuterPosition', [newLeftPos(iAx), allLBWH(iAx, 2 : end)]), 1 : length(JTrajAxes))
+%     %J_AND_ACT_OVER_SSN FORMATTING
+%     % re-size
+%     JTrajAxes = findall(JTrajFig, 'type', 'axes');
+%     newLeftPos = [repelem(0.81, 3), repelem(0.61, 3), repelem(0.41, 3), repelem(0.21, 3), repelem(0.01, 3)]';
+%     allLBWH = cell2mat(get(JTrajAxes, 'OuterPosition'));
+%     arrayfun(@(iAx) set(JTrajAxes(iAx), 'OuterPosition', [newLeftPos(iAx), allLBWH(iAx, 2 : end)]), 1 : length(JTrajAxes))
+%     
+%     % fix ylims by row
+%     iRowMultip = [0.06, 0.2, 0.18];
+%     iRowYLims = [0.02 0.06; -5e-4 20e-4; -1e-6 1e-6];
+%     
+%     for iRow = 1 : 3
+%         tmpYLims = cell2mat(arrayfun(@(iAx) get(JTrajAxes(iAx), 'Ylim'), iRow : 3 : length(JTrajAxes), 'un', 0)');
+%         YMinRow = iRowYLims(iRow, 1); YMaxRow = iRowYLims(iRow, 2);
+%         arrayfun(@(iAx) set(JTrajAxes(iAx), 'YLim', [YMinRow, YMaxRow]), iRow : 3 : length(JTrajAxes))
+%         
+%         % re-position titles
+%         oldRowTitlePos = get(rTitle(iRow), 'Position');
+%         newRowTitleYPos = iRowMultip(iRow) * (abs(YMinRow) + abs(YMaxRow)) + YMaxRow;
+%         set(rTitle(iRow), 'Position', [oldRowTitlePos(1), newRowTitleYPos, 0])
+%         
+%         if iRow == 3
+%             oldFigTitlePos = get(figTitle, 'Position');
+%             set(figTitle, 'Position', [oldFigTitlePos(1), newRowTitleYPos, 0])
+%         end
+%     end
+%     
+%     if ~isfolder([RNNfigdir, 'J_and_act_over_ssn', filesep])
+%         mkdir([RNNfigdir, 'J_and_act_over_ssn', filesep])
+%     end
+%     
+%     print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_J_and_act_over_ssn'])
+%     close
     
-    % fix ylims by row
-    iRowMultip = [0.06, 0.2, 0.18];
-    iRowYLims = [0.02 0.06; -5e-4 20e-4; -1e-6 1e-6];
+    % TRIAL-AVERAGED (SPLIT BY SET) J HISTOGRAMS RE-FORMATTING
+    histFig = figure('color', 'w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0.2 0 0.4 1])
     
-    for iRow = 1 : 3
-        tmpYLims = cell2mat(arrayfun(@(iAx) get(JTrajAxes(iAx), 'Ylim'), iRow : 3 : length(JTrajAxes), 'un', 0)');
-        YMinRow = iRowYLims(iRow, 1); YMaxRow = iRowYLims(iRow, 2);
-        arrayfun(@(iAx) set(JTrajAxes(iAx), 'YLim', [YMinRow, YMaxRow]), iRow : 3 : length(JTrajAxes))
-        
-        % re-position titles
-        oldRowTitlePos = get(rTitle(iRow), 'Position');
-        newRowTitleYPos = iRowMultip(iRow) * (abs(YMinRow) + abs(YMaxRow)) + YMaxRow;
-        set(rTitle(iRow), 'Position', [oldRowTitlePos(1), newRowTitleYPos, 0])
-        
-        if iRow == 3
-            oldFigTitlePos = get(figTitle, 'Position');
-            set(figTitle, 'Position', [oldFigTitlePos(1), newRowTitleYPos, 0])
-        end
+    if exist('colororder', 'file') ~= 0
+        colororder(overSsnColors);
     end
     
-    if ~isfolder([RNNfigdir, 'J_and_act_over_ssn', filesep])
-        mkdir([RNNfigdir, 'J_and_act_over_ssn', filesep])
-    end
+    % normalizing each by area under curve
+    subplot(2, 1, 1),
+    jHist = semilogy(JHistCenters, JHistCounts ./ sum(JHistCounts, 2), 'o-', 'linewidth', 1.75, 'markersize', 7);
+    set(gca, 'fontsize', 14, 'fontweight', 'bold', 'ylim', [0 1], 'xlim', [-40 40]), 
+    xlabel(gca, 'weight'), ylabel(gca, 'log density')
+    arrayfun(@(iLine) set(jHist(iLine), 'MarkerFaceColor', overSsnColors(iLine, :)), 1 : length(jHist));
+    title(['[', monkey, ssnDate, '] trial-averaged J over sets'], 'fontweight', 'bold')
+    legend(gca, cellstr([repmat('set ', length(setsToPlot), 1), num2str(setsToPlot')]), 'location', 'northeastoutside')
+    
+    subplot(2, 1, 2),
+    rHist = semilogy(RAllHistCenters, RHistCounts ./ sum(RHistCounts, 2), 'o-', 'linewidth', 1.75, 'markersize', 7);
+    set(gca, 'fontsize', 14, 'fontweight', 'bold', 'ylim', [0 1], 'xlim', RXLims), 
+    xlabel(gca, 'activation'), ylabel(gca, 'log density')
+    arrayfun(@(iLine) set(rHist(iLine), 'MarkerFaceColor', overSsnColors(iLine, :)), 1 : length(rHist));
+    title(['[', monkey, ssnDate, '] trial-averaged R over sets'], 'fontweight', 'bold')
+    legend(gca, cellstr([repmat('set ', length(setsToPlot), 1), num2str(setsToPlot')]), 'location', 'northeastoutside')
     
     print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_J_and_act_over_ssn'])
     close
     
-    % TRIAL-AVERAGED J HISTOGRAMS RE-FORMATTING
-    overSsnColors = flipud(spring(length(setsToPlot))); % earlier is yellow, later is pink
-    histFig = figure('color', 'w');
-    set(gcf, 'units', 'normalized', 'outerposition', [0 0.0275 1 0.95])
-        if exist('colororder','file') ~= 0
-        colororder(overSsnColors);
+    % OVER SSN CURBD PLOT
+    figure('color', 'w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0.0275 0.0275 0.95 0.95])
+    count = 1;
+    xTks = round(linspace(1, shortestTrl, 5)); % these will be trial averaged sample points
+    for iTarget = 1 : nRegionsCURBD
+        nUnitsTarget = numel(curbdRgns{iTarget, 2});
+        
+        for iSource = 1 : nRegionsCURBD
+            
+            subplot(nRegionsCURBD, nRegionsCURBD, count);
+            hold all;
+            count = count + 1;
+            
+            % TO DO: avgCURBD_set loop through. add overSsn Colors
+            
+            arrayfun(@(iLine) set(rHist(iLine), 'MarkerFaceColor', overSsnColors(iLine, :)), 1 : length(rHist));
+            plot(1 : shortestTrl, mean(avgCURBD_allsets{iTarget, iSource}, 1), 'linewidth', 1.5, 'color', 'k')
+            % TO DO: avgCURBD_set loop through. add overSsn Colors
+            
+            line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', [0.2 0.2 0.2])
+            
+            axis tight;
+            set(gca, 'ylim', CURBDXLims, 'box', 'off', 'tickdir', 'out', 'fontsize', 11)
+            set(gca, 'xtick', xTks, 'xticklabel', num2str([(xTks * dtData) - dtData]', '%.1f'), 'yticklabel', '')
+            
+            if iTarget == size(CURBD, 1) && iSource == 1
+                xlabel('time (s)', 'fontweight', 'bold');
+            end
+            
+            if iSource == 1
+                ylabel([curbdRgns{iTarget, 1}(1 : end - 3), '(', num2str(nUnitsTarget), ')'], 'fontweight', 'bold');
+            end
+            
+            title([curbdRgns{iSource, 1}(1 : end - 3), ' > ', curbdRgns{iTarget, 1}(1 : end - 3)], 'fontweight', 'bold');
+        end
     end
     
-    
-    subplot(2, 1, 1),
-    
-    % normalizing each by area under curve
-    jHist = semilogy(JHistCenters, J_bincounts ./ sum(J_bincounts, 2), 'o-', 'linewidth', 0.8, 'markersize', 1.5);
-    set(gca, 'fontsize', 6, 'ylim', [0 1], 'xlim', hist_xlims)
+    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, 'CURBD_over_ssn'])
+    close
+   
     
     %% check full, intra, inter
     
@@ -1066,13 +1211,13 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     
     % plot histograms of Js
     figure,
-    [J_bincounts,edgesnew] = histcounts(meanJOverLastTrlFirstSetPlot, 75);
+    [JHistCounts,edgesnew] = histcounts(meanJOverLastTrlFirstSetPlot, 75);
     histcenters = edgesnew(1:end-1) + (diff(edgesnew) ./ 2);
     % normalizing each by area under curve
-    semilogy(histcenters,J_bincounts./sum(J_bincounts), 'o-', 'color', [0.12, 0.56, 1], 'linewidth', 1.5, 'markersize', 1.5)
-    [J_bincounts,edgesnew] = histcounts(meanJOverLastTrlLastSetPlot, 75);
+    semilogy(histcenters,JHistCounts./sum(JHistCounts), 'o-', 'color', [0.12, 0.56, 1], 'linewidth', 1.5, 'markersize', 1.5)
+    [JHistCounts,edgesnew] = histcounts(meanJOverLastTrlLastSetPlot, 75);
     histcenters = edgesnew(1:end-1) + (diff(edgesnew) ./ 2);
-    hold on, semilogy(histcenters,J_bincounts./sum(J_bincounts), 'o-', 'color', [0 0 1], 'linewidth', 1.5, 'markersize', 1.5)
+    hold on, semilogy(histcenters,JHistCounts./sum(JHistCounts), 'o-', 'color', [0 0 1], 'linewidth', 1.5, 'markersize', 1.5)
     set(gca, 'fontsize', 13, 'ylim', [0.0001 1], 'xlim', [-20 20])
     xlabel('Weight')
     ylabel('Density')
