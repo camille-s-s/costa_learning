@@ -11,8 +11,7 @@ function RNN = fitCostaRNNv2(RNNname, ...
 rng(42)
 
 %% data meta
-% datadir         = '~/Dropbox (BrAINY
-% Crew)/costa_learning/reformatted_data/';
+% datadir         = '~/Dropbox (BrAINY Crew)/costa_learning/reformatted_data/';
 mouseVer        = '';
 
 %% data parameters
@@ -65,6 +64,10 @@ if ~isfolder([rnnSubDir, 'WN/'])
     mkdir([rnnSubDir, 'WN/'])
 end
 
+if ~isfolder(rnnFigDir)
+    mkdir(rnnFigDir)
+end
+
 % set up final params
 dtRNN           = dtData / dtFactor;    % time step (in s) for integration
 ampWN           = sqrt( tauWN / dtRNN );
@@ -72,17 +75,12 @@ nRunFree        = ceil(0.01 * nRunTrain);
 nRunTot         = nRunTrain + nRunFree;   % idk according to CURBD
 
 %% preprocess targets by smoothing, normalizing, re-scaling, and outlier removing
-
-fPreProc = figure('color', 'w');
-set(fPreProc, 'units', 'normalized', 'outerposition', [0 0.05 1 0.9]);
-        
+   
 targets = allSpikes;
-% subplot(2, 3, 1), hold on, histogram(targets(:)), title('1) raw')
 
 % cleaning: smooth with gaussian
 if doSmooth
     targets = smoothdata(targets, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from msec to #bins);
-    % subplot(2, 3, 2),  histogram(targets(:)), title('2) smoothed')
 end
 
 % cleaning: outlier removal
@@ -112,7 +110,6 @@ if rmvOutliers
         arrayRgns{iRgn, 3}(outliers) = [];
     end
     
-    % subplot(2, 3, 3), histogram(targets(:)), title('3) outliers rmved')
 end
 
 % transformation: center each neuron by subtracting its mean activity
@@ -126,7 +123,6 @@ end
 if doSoftNorm
     normfac = range(targets, 2); % + (dtData * 10); % normalization factor = firing rate range + alpha
     targets = targets ./ normfac;
-    % subplot(2, 3, 3), histogram(targets(:)), title('4) soft-normed')
 end
 
 % housekeeping
@@ -143,20 +139,15 @@ try % choose targ subset and starting trial
     allTrialIDs = unique(arrayfun(@(i) ...
         str2double(prevMdls(i).name(strfind(prevMdls(i).name,'trial') + 5 : end - 4)), ...
         1 : length(prevMdls)));
-    % prevMdl = load([rnnSubDir prevMdls(allTrialIDs ==
-    % max(allTrialIDs)).name]);
     prevMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, ...
         '_set*_trial', num2str(max(allTrialIDs)), '.mat']).name]);
     prevJ = prevMdl.RNN.mdl.J;
-    prevJ0 = prevMdl.RNN.mdl.J0;
     prevTrl = prevMdl.RNN.mdl.iTrl;
     if trainFromPrev
         disp('trainFromPrev = True. Training from last completed trial...')
         startTrl = prevMdl.RNN.mdl.iTrl + 1; % max(allTrialIDs) + 1;
-        % initMdl = load([rnnSubDir, dir([rnnSubDir, RNNname,
-        % '_set0_trial1.mat']).name]); targSubset =
-        % initMdl.RNN.mdl.params.targSubset; % ensure same unit subset used
-        % for all trials
+        % initMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, '_set0_trial1.mat']).name]);
+        % targSubset = initMdl.RNN.mdl.params.targSubset; 
     else
         disp('trainFromPrev = False. Training from trial 1...')
         startTrl = 1;
@@ -174,8 +165,8 @@ end
 
 clearvars prevMdls
 
-% for testing purposes train on subset of available units until model
-% finalized targets = targets(targSubset, :);
+% for dev, train on subset of available units until model finalized
+% targets = targets(targSubset, :);
 
 if plotStatus
     figure, subplot(1,2,1), imagesc(allSpikes), title('non-normed rates'), colorbar, colormap jet, subplot(1,2,2), imagesc(targets), colorbar, title('target rates')
@@ -187,6 +178,7 @@ if plotStatus
 end
 
 clearvars allSpikes
+
 % set up for training
 nUnits = size(targets, 1);
 nLearn = nUnits; % number of learning steps
@@ -207,29 +199,15 @@ if isnan(minLen)
     minLen = min(diff(fixOnInds)); % shortest trial (from fixation to next fixation)
 end
 
-% pull event labels by trial (in time relative to start of each trial) (1 =
-% fixation, 2 = stim, 3 = choice, 4 =  outcome, 5 = time of next trl
-% fixation)
+% pull event labels by trial (in time relative to start of each trial)
+% (1 = fixation, 2 = stim, 3 = choice, 4 =  outcome, 5 = time of next trl fixation)
 stimTimeInds = find(allEvents == 2) - find(allEvents == 1);
 
 clearvars allEvents
 
 % get block/set structure (s sets of j trials each)
-firstTrlInd = find(T.trls_since_nov_stim == 0);
-lastTrlInd = find(T.trls_since_nov_stim  == 0) - 1;
-
-if lastTrlInd(1) ~= 0, keyboard, end
-if firstTrlInd(1) ~= 1, keyboard, end
-
-firstTrlInd(1) = [];
-lastTrlInd(1:2) = [];
-lastTrlInd = [lastTrlInd; height(T)]; % can't have a 0 ind
-% nTrlsPerSet = T.trls_since_nov_stim(lastTrlInd) + 1; % 10 <= j <= 30
-% according to paper ...
 nTrlsPerSet = diff([find(T.trls_since_nov_stim == 0); height(T) + 1]); % 2022/03/16 edit
-% nSets = length(nTrlsPerSet); % s <= 32 according to paper ...
 nSets = sum(T.trls_since_nov_stim == 0); % 2022/03/16 edit
-% setID = [0; repelem(1:nSets, nTrlsPerSet)'];
 setID = repelem(1:nSets, nTrlsPerSet)'; % 2022/03/16 edit
 clearvars T
 
@@ -237,14 +215,7 @@ clearvars T
 stdData = zeros(1,nTrls);
 JTrls = NaN(nUnits, nUnits, nTrls);
 
-if startTrl == 1 % get popmean for each trial to coarsely check for big jumps in input data base stats
-    popTrlMean = NaN(1, nTrls);
-    for iTrl = 1 : nTrls
-        popTrlMean(iTrl) = mean(mean(targets(:, fixOnInds(iTrl) : fixOnInds(iTrl + 1) - 1), 2));
-    end
-end
-
-for iTrl = startTrl : nTrls % - 1 or nSets - 1
+for iTrl = startTrl : startTrl + 9 % startTrl : nTrls % - 1 or nSets - 1
     explodingGradWarn = false; clear fittedConsJ
     fprintf('\n')
     disp([RNNname, ': training trial # ', num2str(iTrl), '.'])
@@ -319,11 +290,6 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     JLearn = NaN(nUnits, nUnits, size(currTargets, 2));
 
     % loop through training runs
-    
-    % all_C = [];
-    c = 0.99; % 22/04/21 testing
-
-
     for nRun = 1 : nRunTot
         
         % set initial condition to match target data
@@ -339,21 +305,9 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
             
             % index in actual RNN time
             tLearn = tLearn + dtRNN;
-            
-            % check if the current index is a reset point. Typically this
-            % won't be used, but it's an option for concatenating
-            % multi-trial data
-            if ismember(tt, resetPoints)
-                H = currTargets(:, floor(tt / dtFactor) + 1);
-            end
-            
+
             % compute next RNN step
             R(:, tt) = nonlinearity(H);
-            
-            if any(isnan(R(:, tt)))
-                disp(['NaN in R at nRun=', num2str(nRun), ', tt= ', num2str(tt), '...'])
-            end
-            
             JR(:, tt) = J * R(:, tt) + inputWN(:, tt);
             
             % update activity
@@ -364,8 +318,8 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                 tLearn = 0;
                 
                 % error signal --> z(t)-f(t), where f(t) = target function
-                % if currTargets are  currents, compare JR if currTargets
-                % are rates, compare RNN
+                % if currTargets are  currents, compare JR
+                % if currTargets are rates, compare RNN
                 error = R(1:nUnits, tt) - currTargets(1:nUnits, iLearn);
                 
                 if norm(error) > 15 % potential exploding gradient problem?
@@ -393,10 +347,8 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                     % quickly/take big steps (aka momentum) - as closer,
                     % don't wanna overshoot (convergence would take longer)
                     % so take smaller steps
-                    % c = 1 / (1 + rPr); % tune learning rate by looking at magnitude of model activity
-                    
-                    % all_C = [all_C, c]; % to see how c changes....
-                    
+                    c = 1 / (1 + rPr); % tune learning rate by looking at magnitude of model activity
+                                        
                     % use squared firing rates (R * R^T) to update PJ -
                     % maybe momentum effect?
                     PJ = PJ - c * (k * k');
@@ -405,33 +357,53 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
                     % B = some random error matrix
                     % J(1 : nUnits, iTarget) = J(1 : nUnits, iTarget) - B * c * error(1 : nUnits, :);
                     
-                    % normally would do entire J matrix, use
-                    % pre-syn J instead of entire J ... in addition to line
-                    % 399, would add - 0.5 * norm(J(1 : nUnits)) .^ 2
-                    % should be equivalent to
+                    % IA
                     % pDecay = -0.5 * (sum(J(1 : nUnits, iTarget) .^2 )); % or 0.5 * norm(J(1 : nUnits, iTarget)) ^ 2
-                    % Amp IA - x(l+1) will be R, x(l) = currTarg dim R and
-                    % B(J) must align w currTargets currTarg' * J * R
+
                     % pAmp = -trace(currTargets(1 : nUnits, iLearn)' * J(1 : nUnits, iTarget) * R(iTarget, tt));
                     % pNull = 0.5 *  sum((J(1 : nUnits, iTarget) * R(iTarget, tt)) .^ 2);
                     
                     % 4/19 attempt
-                    pDecay = (1/2) *  norm(J(1 : nUnits, iTarget)) ^ 2;
-                    pAmp = -trace( currTargets(1 : nUnits, iLearn)' * J(1 : nUnits, iTarget) * R(iTarget, tt));
-                    pNull = (1/2) * norm(J(1 : nUnits, iTarget) * R(iTarget, tt)) ^2;
-                    IA = pDecay + pAmp + pNull;
+                    % pDecay = (1/2) *  norm(J(1 : nUnits, iTarget)) ^ 2;
+                    % pAmp = -trace( currTargets(1 : nUnits, iLearn)' * J(1 : nUnits, iTarget) * R(iTarget, tt));
+                    % pNull = (1/2) * norm(J(1 : nUnits, iTarget) * R(iTarget, tt)) ^2;
+                    % IA = pDecay + pAmp + pNull;
+                    
+                    
+                    % 5/5 attempt knowing norm(x) = sqrt(sum of squares) so
+                    % (norm(x) ^ 2) = sum of squares + J as col vec aka
+                    % (1/2) * sum(J(1 : nUnits, 10) .^2) == (1/2) * norm(J(1 : nUnits, 10)) ^2
+                    % iPresyn = 10;
+                    % pDecay = (1/2) * sum(J(1 : nUnits, iPresyn) .^2 );
+                    % TO DO 5/6: do this for rest o terms, try arrayfun,
+                    % see how it compares to J stats
+                   
                     % J(1:nUnits, iTarget) = J(1:nUnits, iTarget) - c * error(1:nUnits, :) * k' + IA;
                     
                     %% plain J update
                     % (pre-syn wts adjusted according to post-syn target)
                     J(1 : nUnits, iTarget) = J(1 : nUnits, iTarget) - c * error(1 : nUnits, :) * k';
+                                        
+                    % monitor that bitch
+                    % clf(f2),
+                    % subplot(1,3,1)
+                    % histogram(H, 10), title(['H @ nRun=', num2str(nRun), ', tt=', num2str(tt)]), ylabel('#units')
+
+                    % subplot(1,3,2)
+                    % imagesc(R), set(gca, 'clim', [0 1]), colormap(jet), colorbar, title(['R @ nRun=', num2str(nRun), ', tt=', num2str(tt)])
                     
+                    % subplot(1,3,3)
+                    % imagesc(J), set(gca, 'clim', [-2 2]), colormap(jet), colorbar, title(['J @ nRun=', num2str(nRun), ', tt=', num2str(tt)])
                     
+                    % pause(0.00005)
                     %%
-                    
                     % for each learning step of a given run, save
                     % consecutive Js
-                    JLearn(:, :, iLearn) = J; 
+                    % JLearn(:, :, iLearn) = J;
+                    
+                    if nRun == nRunTrain
+                        JLearn(:, :, iLearn) = J; % thenwhen nRun == nRunTot, compare JLearn2 and JLearn
+                    end
                 end
                 
             end
@@ -442,9 +414,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
         rModelSample = R(iTarget, iModelSample);
         pVar = 1 - ( norm(currTargets(iTarget,:) - rModelSample, 'fro' ) / ( sqrt(length(iTarget) * length(tData)) * stdData(iTrl)) ).^2;
         pVars(nRun) = pVar;
-        % JEndOfRun(:, :, nRun) = J; % save fitted J from end of a run for
-        % troubleshooting REndOfRun(:, :, nRun) = R; % same as above
-        
+
         if pVar < 0
             disp('pVar < 0!')
         end
@@ -500,7 +470,7 @@ for iTrl = startTrl : nTrls % - 1 or nSets - 1
     % package up and save outputs at the end of training for each link
     RNN = struct;
     
-    if setID(iTrl) == 0
+    if setID(iTrl) == 1 % untested
         rnnParams = struct( ...
             'iTrl',                 iTrl, ...
             'doSmooth',             doSmooth, ...
