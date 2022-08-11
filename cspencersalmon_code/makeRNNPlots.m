@@ -19,7 +19,7 @@ setToPlot       = 2; % only one for now - must be 2 or greater to get last trial
 
 % in and outdirs
 bd              = '~/Dropbox (BrAINY Crew)/costa_learning/';
-mouseVer        = 'PINKY_VERSION/';
+mouseVer        = 'BRAIN_VERSION/';
 mdlDir          = [bd 'models/', mouseVer];
 RNNfigdir       = [bd 'figures/', mouseVer];
 RNNSampleDir    = [mdlDir 'model_samples/'];
@@ -27,6 +27,11 @@ spikeInfoPath   = [bd 'reformatted_data/'];
 
 %%
 addpath(genpath(bd))
+
+if ~isfolder(RNNSampleDir)
+    mkdir(RNNSampleDir)
+end
+
 cd(spikeInfoPath)
 
 allFiles = dir('*_meta.mat');
@@ -43,7 +48,7 @@ if setToPlot < 2
     keyboard
 end
 
-for iFile = 1 % 1 : length(allFiles) % for each session....
+for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     
     fName = allFiles(iFile).name;
     fID = fName(1:strfind(fName, '_') - 1);
@@ -59,7 +64,11 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     
     % for first trial of a session, pull params (this field is empty for
     % all other trials in a session)
-    firstTrl = find(arrayfun(@(i) isequal(currSsn(i).name, ['rnn_', monkey, ssnDate, '_set0_trial1.mat']), 1 : nTrls));
+    firstTrl = find(arrayfun(@(i) isequal(currSsn(i).name, ['rnn_', monkey, ssnDate, '_set1_trial1.mat']), 1 : nTrls));
+    if isempty(firstTrl) % due to old naming convention
+        firstTrl = find(arrayfun(@(i) isequal(currSsn(i).name, ['rnn_', monkey, ssnDate, '_set0_trial1.mat']), 1 : nTrls));
+    end
+    
     spikeInfoName = [currSsn(firstTrl).name(5 : median(strfind(currSsn(firstTrl).name, '_'))-1), '_meta.mat'];
     load([spikeInfoPath, spikeInfoName], 'spikeInfo', 'trlInfo', 'dsAllEvents')
     load([mdlDir, monkey, ssnDate, filesep, currSsn(firstTrl).name]);
@@ -366,7 +375,7 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     R_U_reordered = arrayfun(@(iTrl) R_U{iTrl}(newOrder, :), 1 : nTrls, 'un', 0)';
     J_U_reordered = J_U(newOrder, newOrder, :); % of note: J_U == J_S
     
-    %% reorder full J and use it to get intra/inter only Js
+    %% reorder full J and use it to get intra/inter only Js + plot J, R distributions + CURBD
         
     % get inds for new order by region
     tmp = [0; nUnitsAll];
@@ -428,7 +437,7 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     set(gca, 'fontsize', 14, 'fontweight', 'bold', 'ylim', [0 1], 'xlim', RXLims), 
     xlabel(gca, 'activation'), ylabel(gca, 'log density')
     title(['[', monkey, ssnDate, '] trial-averaged R over subsampled trials'], 'fontweight', 'bold')
-    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_J_and_act_avgd'])
+    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_J_and_act_avgd'])
     close
     
     % set up CURBD avg over sets plot
@@ -444,10 +453,10 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     set(gcf, 'units', 'normalized', 'outerposition', [0 0 1 1])
     count = 1;
     xTks = round(linspace(1, shortestTrl, 5)); % these will be trial averaged sample points
-    axLPos = linspace(0.038, 0.85, nRegionsCURBD);
-    axBPos = linspace(0.85, 0.07, nRegionsCURBD);
-    axWPos = 0.10;
-    axHPos = 0.09;
+    axLPos = linspace(0.04, 0.85, nRegionsCURBD);
+    axBPos = linspace(0.9, 0.07, nRegionsCURBD);
+    axWPos = 0.09;
+    axHPos = 0.08;
     
     for iTarget = 1 : nRegionsCURBD
         nUnitsTarget = numel(curbdRgns{iTarget, 2});
@@ -462,7 +471,7 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
                 'linewidth', 1.5, 'EdgeColor', 'interp', 'Marker', '.', 'MarkerFaceColor', 'flat')
             axis tight, 
             line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', [0.2 0.2 0.2])
-            set(gca, 'ylim', [-1 * CURBDYLims, CURBDYLims], 'clim', [-1 * CURBDYLims, CURBDYLims], 'box', 'off', 'tickdir', 'out', 'fontsize', 11)
+            set(gca, 'ylim', [-1 * CURBDYLims, CURBDYLims], 'clim', [-1 * CURBDYLims, CURBDYLims], 'box', 'off', 'tickdir', 'out', 'fontsize', 10)
 
             if iTarget == nRegionsCURBD && iSource == 1
                 xlabel('time (s)', 'fontweight', 'bold');
@@ -482,10 +491,10 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
         end
     end
     
-    text(gca, -40, -1.5 * CURBDYLims, [monkey, ssnDate, ' CURBD (trial averaged)'], 'fontsize', 16, 'fontweight', 'bold')
+    text(gca, -60, -1.5 * CURBDYLims, [monkey, ssnDate, ' CURBD (trial averaged)'], 'fontsize', 16, 'fontweight', 'bold')
     cm = brewermap(250,'*RdBu');
     colormap(cm)
-    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_CURBD_avgd'])
+    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_CURBD_avgd'])
     close
     
     % OVER SET HISTS: set up histogram plotting
@@ -498,9 +507,9 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     figure('color', 'w');
     set(gcf, 'units', 'normalized', 'outerposition', [0 0.0275 1 0.95])
     avgCURBD_set = cell(1, numel(setsToPlot));
-    count2 = 0;
     
-    for iSet = setsToPlot % min(allSetIDs) : max(allSetIDs)
+    count2 = 0;
+    for iSet = min(allSetIDs) : max(allSetIDs) % setsToPlot 
         
         trlIDs = find(setID == iSet);
         fittedJ_samples = NaN([fittedConsJDim, numel(trlIDs)]);
@@ -532,9 +541,6 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
        R_set_trunc = cell2mat(R_set_trunc_cell');
        inds_set_trunc = [1; cumsum(repmat(shortestTrl, length(trlIDs), 1)) + 1]';
        
-       % CURBD that bitch
-       [CURBD, avgCURBD, ~, ~] = costaCURBD(J_set, R_set_trunc, inds_set_trunc, curbdRgns, minTrlsPerSet);        
-                 
         % initialize submatrices
         interJ_samples = fullJ_samples;
         intraJ_samples = zeros(size(fullJ_samples));
@@ -555,8 +561,10 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
         
         % want even distribution of sets over fixed dur for each subject/session
         if ismember(iSet, setsToPlot)
-            
             count2 = count2 + 1;
+            
+            % CURBD that bitch
+            [CURBD, avgCURBD, ~, ~] = costaCURBD(J_set, R_set_trunc, inds_set_trunc, curbdRgns, minTrlsPerSet);
             avgCURBD_set(count2) = {avgCURBD}; % collect into cell for later plotting of CURBD
             
             % get trial averaged truncated activity from minTrlsPerSet for
@@ -604,7 +612,7 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     title(['[', monkey, ssnDate, '] trial-averaged R over sets'], 'fontweight', 'bold')
     legend(gca, cellstr([repmat('set ', length(setsToPlot), 1), num2str(setsToPlot')]), 'location', 'northeastoutside')
     
-    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_J_and_act_over_sets'])
+    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_J_and_act_over_sets'])
     close
     
     figure('color', 'w');
@@ -632,7 +640,7 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
             plot(1 : shortestTrl, popMeanSetCURBD, '-', 'linewidth', 1.5)
             axis tight,
             line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', [0.2 0.2 0.2])
-            set(gca, 'ylim', [-1 * CURBDYLims, CURBDYLims], 'clim', [-1 * CURBDYLims, CURBDYLims], 'box', 'off', 'tickdir', 'out', 'fontsize', 11)
+            set(gca, 'ylim', [-1 * CURBDYLims, CURBDYLims], 'clim', [-1 * CURBDYLims, CURBDYLims], 'box', 'off', 'tickdir', 'out', 'fontsize', 10)
             
             if iTarget == nRegionsCURBD && iSource == 1
                 xlabel('time (s)', 'fontweight', 'bold');
@@ -652,18 +660,14 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
         end
     end
     
-    text(gca, -40, -1.5 * CURBDYLims, [monkey, ssnDate, ' CURBD (over sets)'], 'fontsize', 16, 'fontweight', 'bold')
+    text(gca, -60, -1.5 * CURBDYLims, [monkey, ssnDate, ' CURBD (over sets)'], 'fontsize', 16, 'fontweight', 'bold')
     cm = brewermap(100,'*RdBu');
     colormap(cm)
-    print('-dtiff', '-r400', [RNNfigdir, 'J_and_act_over_ssn', filesep, monkey, ssnDate, '_CURBD_over_sets'])
+    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_CURBD_over_sets'])
     close
    
     %% check full, intra, inter
-    
-    if ~isfolder([RNNfigdir, 'JOVerTrls', filesep])
-        mkdir([RNNfigdir, 'JOverTrls', filesep])
-    end
-    
+   
     trlsPerFig = 500;
     
     for f = 1 : ceil(nTrls / trlsPerFig) % new plot every five hundred trials
@@ -686,25 +690,17 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
         line(gca, get(gca, 'xlim'), [0 0], 'linestyle', '-.', 'linewidth', 1, 'color', [0.2 0.2 0.2])
         title(gca, [monkey, ssnDate, ': mean consecutive J over trls'], 'fontsize', 14, 'fontweight', 'bold')
         
-        print('-dtiff', '-r400', [RNNfigdir, 'JOverTrls', filesep, monkey, ssnDate, '_intraVsIntervsFull_', num2str(f)])
+        print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_mean_J_over_trls_', num2str(f)])
         close
     end
     
     %% pVar / chi2 for first and last J
-    
-    if ~isfolder([RNNfigdir, 'pVar', filesep])
-        mkdir([RNNfigdir, 'pVar', filesep])
-    end
-    
+
     figure, set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.15 0.8 0.7]),
     plot(pVarsTrls(trlSort), 'linewidth', 1.5, 'color', [0.05 0.4 0.15]), set(gca, 'ylim', [0.1 1], 'xlim', [1 nTrls]),
     title(gca, [monkey, ssnDate, ': pVar over trials'], 'fontsize', 14, 'fontweight', 'bold')
-    print('-dtiff', '-r400', [RNNfigdir, 'pVar', filesep, monkey, ssnDate, '_eachTrl'])
+    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_pVar_over_trls'])
     close
-    
-    if ~isfolder([RNNfigdir, 'convergence', filesep])
-        mkdir([RNNfigdir, 'convergence', filesep])
-    end
     
     idx = 15; % randi(size(intraRgnJ, 1));
     figure('color', 'w')
@@ -742,8 +738,8 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     plot(firstChi2(1:nRun), 'k', 'linewidth', 1.5)
     ylabel('chi2');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(firstChi2(end), '%.3f')])
     set(gca,'Box','off','TickDir','out','FontSize',14);
-    saveas(gcf, [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'], 'svg')
-    print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'])
+    % saveas(gcf, [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'], 'svg')
+    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_first_trl_convergence'])
     close
     
     % last
@@ -782,634 +778,10 @@ for iFile = 1 % 1 : length(allFiles) % for each session....
     plot(lastChi2(1:nRun), 'k', 'linewidth', 1.5)
     ylabel('chi2'); xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(lastChi2(end), '%.3f')])
     set(gca,'Box','off','TickDir','out','FontSize',14);
-    print('-dtiff', '-r400', [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_lastTrlConvergence'])
+    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_last_trl_convergence'])
     close
-
 end
-    %% vectorized J: inter, intra TO DO 2022/01/11: CHECK IF THIS WORKS 
-    
-%     intraJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
-%     interJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
-%     fullJResh = NaN(sum(nUnitsAll)^2, nSamples, nTrls);
-%     
-    % self proof
-%     tmp = intraJMat(:, :, 1, 1);
-%     tmpResh = reshape(tmp, 1, numel(tmp));
-%     isequal(tmp, reshape(tmpResh, size(tmp)))
-    
-%     for iSet = min(allSetIDs) : max(allSetIDs)
-%         
-%         trlIDs = find(setID == iSet);
-%         
-%             intraJResh = NaN(sum(nUnitsAll)^2, nSamples, numel(trlIDs));
-%     interJResh = NaN(sum(nUnitsAll)^2, nSamples, numel(trlIDs));
-%     fullJResh = NaN(sum(nUnitsAll)^2, nSamples, numel(trlIDs));
-%     
-%         
-%         for iTrl = 1 : length(trlIDs)
-%             
-%             intraJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
-%                 reshape(intraJMat(:, :, iSample, trlIDs(iTrl)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
-%           
-%             interJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
-%                 reshape(interJMat(:, :, iSample, trlIDs(iTrl)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
-%           
-%             fullJResh(:, :, iTrl) = cell2mat(arrayfun(@(iSample) ...
-%                 reshape(fullJMat(:, :, iSample, trlIDs(iTrl)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', 0)')';
-%             
-% %             intraJResh{iTrl} = arrayfun(@(iSample) ...
-% %                 reshape(squeeze(intraJ{iTrl}(:, :, iSample)), 1, size(in_rgn, 1)^2), 1 : nSamples, 'un', false);
-% %             interJResh{iTrl} = arrayfun(@(iSample) ...
-% %                 reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-% %             fullJResh{iTrl} = arrayfun(@(iSample) ...
-% %                 reshape(squeeze(fullJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-%         end
-%         
-%         intraJSampleResh = intraJResh(:, :, trlIDs);
-%         interJSampleResh = interJResh(:, :, trlIDs);
-%         trlIDsCurrSet = allTrialIDs(trlIDs);
-%         activitySample = activitySampleAll(:, :, trlIDs);
-% 
-%         save([RNNSampleDir, 'classifier_matrices_resh_IntraOnly', monkey, ssnDate, ...
-%             '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
-%         save([RNNSampleDir, 'classifier_matrices_resh_InterOnly', monkey, ssnDate, ...
-%             '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
-%         
-%     end
-
-    %%
-    
-%     for iTrl = 1 : nTrls
-%         fullJResh{iTrl} = arrayfun(@(iSample) ...
-%                 reshape(squeeze(fullJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-%         interJResh{iTrl} = arrayfun(@(iSample) ...
-%                 reshape(squeeze(interJ{iTrl}(:, :, iSample)), 1, sum(nUnitsAll)^2), 1 : nSamples, 'un', false);
-%     end
-%     
-     %% PCA OF TRAINED MODEL ACTIVITY MATRIX
-%         
-%     % remove bad units from  activity
-%     d = cell2mat(R_U');
-%     [~, FR_cutoff] = isoutlier(mean(d, 2), 'percentile', [0.5 100]); % [0.5 100] % throw out outliers since not good for PCA
-%     bad_units = mean(d, 2) <= FR_cutoff;
-%     
-%     % throw out any trials that are weirdly long or short
-%     trlDursRNN = arrayfun(@(s) size(R_U{s}, 2), 1 : size(R_U, 1));
-%     [~, minTrlLen, maxTrlLen] = isoutlier(trlDursRNN, 'percentile', [5 95]); % [1 99]
-%     
-%     if maxTrlLen > median(trlDursRNN) + (2 * std(trlDursRNN))
-%         maxTrlLen = median(trlDursRNN) + (2 * std(trlDursRNN));
-%     end
-%     
-%     bad_trls = trlDursRNN >= maxTrlLen | trlDursRNN <= minTrlLen;
-%     Rtmp = R_U(~bad_trls);
-%     durBtwnTrls = [NaN; diff(trlInfo.event_times(:, 1))];
-%     T = trlInfo(~bad_trls, :);
-%     durBtwnTrls = durBtwnTrls(~bad_trls, :);
-%     
-%     % elapsed time between events (1 = fixation, 2 = stim, 3 = choice, 4 =
-%     % outcome, 5 = time of next trl fixation)
-%     avgEventTS = [mean(T.aligned_event_times, 1), nanmean(durBtwnTrls)];
-%     eventInds = round(avgEventTS / dtData);
-%     eventInds(1) = 1;
-%     
-%     % pad remaining units and trials to same length
-%     longestTrl = max(arrayfun(@(s) max(size(Rtmp{s}, 2)), 1 : size(Rtmp, 1)));
-%     trlsPadded = arrayfun(@(s) ...
-%         [Rtmp{s}, NaN(size(Rtmp{s}, 1), longestTrl - size(Rtmp{s}, 2))], 1 : size(Rtmp, 1), 'un', false);
-%     X = cell2mat(trlsPadded);
-%     
-%     % trial average them
-%     trlsAvgR = cell2mat(arrayfun( @(n) nanmean(reshape(X(n, :), longestTrl, (nTrls - sum(bad_trls))), 2), 1 : size(X, 1), 'un', false))';
-%     trlsAvgR(bad_units, :) = [];
-%     
-%     % coeffs from all activity, trial averaged and padded
-%     [wR, scores, eigen, ~, pvar, mu] = pca(trlsAvgR', 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
-%     
-%     % estimate effective dimensionality
-%     if ~isfolder([RNNfigdir, 'effDimMdlActivity', filesep])
-%         mkdir([RNNfigdir, 'effDimMdlActivity', filesep])
-%     end
-%     
-%     figure('color', 'w'), plot(1 : length(eigen), cumsum(pvar), 'linewidth', 1.5, 'color', 'b')
-%     set(gca, 'fontweight', 'bold', 'fontsize', 13, 'ylim', [0 110], 'xlim', [1 round(0.1 * length(eigen))])
-%     grid minor, xlabel('# PCs (10% of actual total)'), ylabel('% variance explained')
-%     nPC_cutoff = find(cumsum(pvar) >= 99,1, 'first');
-%     line(gca, [nPC_cutoff nPC_cutoff], get(gca, 'ylim'), 'linestyle', '--', 'linewidth', 1.5, 'color', 'k')
-%     text(gca, round(1.2 * nPC_cutoff), 10, ['#PCs = ', num2str(nPC_cutoff)], 'fontweight', 'bold')
-%     
-%     title(gca, [monkey, ssnDate, ': eff dim (99% var exp) for avg mdl activity (#', num2str(nTrls - sum(bad_trls)), ' trls)'], 'fontsize', 14, 'fontweight', 'bold')
-%     print('-dtiff', '-r400', [RNNfigdir, 'effDimMdlActivity', filesep, monkey, ssnDate, '_effDimMdlActivity'])
-%     close
-%     
-%     % project data into low D space
-%     if ~isfolder([RNNfigdir, 'topPCsMdlActivity', filesep])
-%         mkdir([RNNfigdir, 'topPCsMdlActivity', filesep])
-%     end
-%     
-%     figure('color', 'w'); hold on
-%     set(gcf, 'units', 'normalized', 'outerposition', [0.25 0.1 0.5 0.8])
-%     cm = colormap(cool);
-%     colormap(cm)
-%     
-%     % project padded trial averaged activity (all) into low D space
-%     projData = trlsAvgR';
-%     tempProj = (projData - repmat(mu,size(projData,1),1)) * wR;
-%     x = tempProj;
-%     plot3(x(:, 1), x(:, 2), x(:, 3), 'color', [0.66 0.66 0.66], 'linewidth', 2)
-%     plot3(x(10 : 10 : end - 10, 1), x(10 : 10 : end - 10, 2), x(10 : 10 : end - 10, 3), 'linestyle', 'none', 'marker', 'o', 'markersize', 8, 'markeredgecolor', [0 0 0.2], 'markerfacecolor', 'w')
-%     
-%     % mark events on plot
-%     eventColors = {'g', 'c', 'b', 'm', 'g'};
-%     eventName = {'fixation (current trial)', 'stimulus', 'choice', 'outcome', 'fixation (next trial)'};
-%     
-%     for event = 1 : length(eventInds)
-%         eventLbls(event) = plot3(x(eventInds(event), 1), x(eventInds(event), 2), x(eventInds(event), 3), ...
-%             'linestyle', 'none', 'marker', 'd', 'markersize', 15, 'markeredgecolor', 'k', 'markerfacecolor', eventColors{event});
-%     end
-%     
-%     set(eventLbls(end), 'marker', 's') % mark next trial w different shape
-%     legend(gca, eventLbls, eventName)
-%     
-%     set(gca, 'fontweight', 'bold', 'fontsize', 13)
-%     xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
-%     grid minor
-%     view(3)
-%     title(gca, [monkey, ssnDate, ': avg mdl activity projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
-%     saveas(gcf, [RNNfigdir, 'topPCsMdlActivity', filesep, monkey, ssnDate, '_topPCsMdlActivity'], 'svg')
-%     print('-dtiff', '-r400', [RNNfigdir, 'topPCsMdlActivity', filesep, monkey, ssnDate, '_topPCsMdlActivity'])
-%     close
-%     
-    %% WIP: PCA of activity over nD trials from chosen set idk look up jPCA trajectories look up difference between
-    
-%    % remove bad units from  activity
-%     d = cell2mat(D_U');
-%     [~, FR_cutoff] = isoutlier(mean(d, 2), 'percentile', [0.5 100]); % [0.5 100] % throw out outliers since not good for PCA
-%     bad_units = mean(d, 2) <= FR_cutoff;
-%     
-%     % throw out any trials that are weirdly long or short
-%     trlDursRNN = arrayfun(@(s) size(D_U{s}, 2), 1 : size(D_U, 1));
-%     [~, minTrlLen, maxTrlLen] = isoutlier(trlDursRNN, 'percentile', [5 95]); % [1 99]
-%     
-%     if maxTrlLen > median(trlDursRNN) + (2 * std(trlDursRNN))
-%         maxTrlLen = median(trlDursRNN) + (2 * std(trlDursRNN));
-%     end
-%     
-%     bad_trls = trlDursRNN >= maxTrlLen | trlDursRNN <= minTrlLen;
-%     Dtmp = D_U(~bad_trls);
-%     durBtwnTrls = [NaN; diff(trlInfo.event_times(:, 1))];
-%     T = trlInfo(~bad_trls, :);
-%     durBtwnTrls = durBtwnTrls(~bad_trls, :);
-%     
-%     % elapsed time between events (1 = fixation, 2 = stim, 3 = choice, 4 =
-%     % outcome, 5 = time of next trl fixation)
-%     avgEventTS = [mean(T.aligned_event_times, 1), nanmean(durBtwnTrls)];
-%     eventInds = round(avgEventTS / dtData);
-%     eventInds(1) = 1;
-%     
-%     % pad remaining units and trials to same length
-%     longestTrl = max(arrayfun(@(s) max(size(Dtmp{s}, 2)), 1 : size(Dtmp, 1)));
-%     trlsPadded = arrayfun(@(s) ...
-%         [Dtmp{s}, NaN(size(Dtmp{s}, 1), longestTrl - size(Dtmp{s}, 2))], 1 : size(Dtmp, 1), 'un', false);
-%     X = cell2mat(trlsPadded);
-%     
-%     % trial average them
-%     trlsAvgD = cell2mat(arrayfun( @(n) nanmean(reshape(X(n, :), longestTrl, (nTrls - sum(bad_trls))), 2), 1 : size(X, 1), 'un', false))';
-%     trlsAvgD(bad_units, :) = [];
-%     
-%     % coeffs from all activity, trial averaged and padded
-%     [w, scores, eigen, ~, pvar, mu] = pca(trlsAvgD', 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
-%     
-%     % estimate effective dimensionality
-%     if ~isfolder([RNNfigdir, 'effDimAllActivity', filesep])
-%         mkdir([RNNfigdir, 'effDimAllActivity', filesep])
-%     end
-%     
-%     figure('color', 'w'), plot(1 : length(eigen), cumsum(pvar), 'linewidth', 1.5, 'color', 'b')
-%     set(gca, 'fontweight', 'bold', 'fontsize', 13, 'ylim', [0 110], 'xlim', [1 round(0.1 * length(eigen))])
-%     grid minor, xlabel('# PCs (10% of actual total)'), ylabel('% variance explained')
-%     nPC_cutoff = find(cumsum(pvar) >= 99,1, 'first');
-%     line(gca, [nPC_cutoff nPC_cutoff], get(gca, 'ylim'), 'linestyle', '--', 'linewidth', 1.5, 'color', 'k')
-%     text(gca, round(1.2 * nPC_cutoff), 10, ['#PCs = ', num2str(nPC_cutoff)], 'fontweight', 'bold')
-%     
-%     title(gca, [monkey, ssnDate, ': eff dim (99% var exp) for avg activity (#', num2str(nTrls - sum(bad_trls)), ' trls)'], 'fontsize', 14, 'fontweight', 'bold')
-%     print('-dtiff', '-r400', [RNNfigdir, 'effDimAllActivity', filesep, monkey, ssnDate, '_effDimAllActivity'])
-%     close
-%     
-%     % project data into low D space
-%     if ~isfolder([RNNfigdir, 'topPCsAllActivity', filesep])
-%         mkdir([RNNfigdir, 'topPCsAllActivity', filesep])
-%     end
-%     
-%     figure('color', 'w'); hold on
-%     set(gcf, 'units', 'normalized', 'outerposition', [0.25 0.1 0.5 0.8])
-%     cm = colormap(cool);
-%     colormap(cm)
-%     
-%     % project padded trial averaged activity (all) into low D space
-%     projData = trlsAvgD';
-%     tempProj = (projData - repmat(mu,size(projData,1),1)) * wR;
-%     x = tempProj;
-%     plot3(x(:, 1), x(:, 2), x(:, 3), 'color', 'k', 'linewidth', 2)
-%     plot3(x(10 : 10 : end - 10, 1), x(10 : 10 : end - 10, 2), x(10 : 10 : end - 10, 3), 'linestyle', 'none', 'marker', 'o', 'markersize', 8, 'markeredgecolor', 'k', 'markerfacecolor', 'w')
-%     
-%     % mark events on plot
-%     eventColors = {'g', 'c', 'b', 'm', 'g'};
-%     eventName = {'fixation (current trial)', 'stimulus', 'choice', 'outcome', 'fixation (next trial)'};
-%     
-%     for event = 1 : length(eventInds)
-%         eventLbls(event) = plot3(x(eventInds(event), 1), x(eventInds(event), 2), x(eventInds(event), 3), ...
-%             'linestyle', 'none', 'marker', 'd', 'markersize', 15, 'markeredgecolor', 'k', 'markerfacecolor', eventColors{event});
-%     end
-%     
-%     set(eventLbls(end), 'marker', 's') % mark next trial w different shape
-%     legend(gca, eventLbls, eventName)
-%     
-%     set(gca, 'fontweight', 'bold', 'fontsize', 13)
-%     xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
-%     grid minor
-%     view(3)
-%     title(gca, [monkey, ssnDate, ': avg real activity projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
-%     saveas(gcf, [RNNfigdir, 'topPCsAllActivity', filesep, monkey, ssnDate, '_realActPjnIntoMdlPCSpace'], 'svg')
-%     print('-dtiff', '-r400', [RNNfigdir, 'topPCsAllActivity', filesep, monkey, ssnDate, '_topPCsAllActivity'])
-%     close
-%     
    
-     %% 2021-10-27 : EXTRACT J SAMPLES FOR CLASSIFIER
-     
-%      activitySampleMat = NaN(sum(nUnitsAll), nSamples, nTrls);
-%      
-%      % Sloppy grabbing
-%      for iTrl = 1 : nTrls
-%          sampleTimePoints = allSPTimePoints(iTrl, :);
-%          % to save! note that J is reordered by region
-%          activitySampleAll{iTrl} = R_U{iTrl}(:, sampleTimePoints); % TO DO: FIGURE OUT WHAT THE ISSUE IS W INDEXING FROM MIN_LEN - SHOULDNT NEED TO TRANSFORM IT FOR PULLING MODEL ACTIVITY
-%          activitySampleMat(:, :, iTrl) = activitySampleAll{iTrl};
-%      end
-     
-%      meanIntraJAcrossTrls = mean(squeeze(cell2mat(arrayfun(@(iTrl) mean(intraJ{iTrl}, [1 2]), 1 : nTrls, 'un', false))), 1);
-%      meanActAcrossTrls = mean(cell2mat(arrayfun(@(iTrl) mean(activitySampleAll{iTrl}, 1), 1 : nTrls, 'un', false)'), 1);
-%      stdIntraJAcrossTrls = std(squeeze(cell2mat(arrayfun(@(iTrl) mean(intraJ{iTrl}, [1 2]), 1 : nTrls, 'un', false))), 0, 1) ./ sqrt(sum(nUnitsAll));
-%      stdActAcrossTrls = std(cell2mat(arrayfun(@(iTrl) mean(activitySampleAll{iTrl}, 1), 1 : nTrls, 'un', false)'), 0, 1) ./ sqrt(sum(nUnitsAll));
-%      
-%      figure, errorbar(meanIntraJAcrossTrls, stdIntraJAcrossTrls, 'linewidth', 1.5), set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5]), xlabel('sample point#'), ylabel('pop mean J')
-%      saveas(gcf, [RNNfigdir, 'intraRgnDeltaJs_consecutiveSamplesSingleTrl', filesep, monkey, ssnDate, '_meanJAcrossTrls'], 'svg')
-%      print(gcf, '-dtiff', '-r400', [RNNfigdir, 'intraRgnDeltaJs_consecutiveSamplesSingleTrl', filesep, monkey, ssnDate, '_meanJAcrossTrls']),
-%      close
-%      
-%      figure, errorbar(meanActAcrossTrls, stdActAcrossTrls, 'linewidth', 1.5), set(gca, 'fontweight', 'bold', 'fontsize', 12, 'xlim', [0.5 nSamples + 0.5]), xlabel('sample point#'), ylabel('pop mean FR')
-%      print(gcf, '-dtiff', '-r400', [RNNfigdir, 'intraRgnDeltaJs_consecutiveSamplesSingleTrl', filesep, monkey, ssnDate, '_meanActAcrossTrls']),
-%      close
-     
-%      for iSet = min(allSetIDs) : max(allSetIDs)
-%          activitySample = activitySampleAll(setID == iSet);
-%          intraJSample = intraRgnConsJ(setID == iSet);
-%          intraJSampleResh = intraRgnConsJResh(setID == iSet);
-%          interJSample = interRgnConsJ(setID == iSet);
-%          interJSampleResh = interRgnConsJResh(setID == iSet);
-%          
-%          trlIDsCurrSet = allTrialIDs(setID == iSet);
-%          
-%          % for the last trial of the first and last included sets, take the mean over all
-%          % samples to plot representative histograms
-%          if iSet == min(allSetIDs)
-%              meanJOverLastTrlFirstSet = mean(intraJSample{end}, 3);
-%              meanJOverLastTrlFirstSetPlot = reshape(sqrt(sum(nUnitsAll)) * meanJOverLastTrlFirstSet, sum(nUnitsAll)^2, 1);
-%          end
-%          
-%          if iSet == max(allSetIDs)
-%              meanJOverLastTrlLastSet = mean(intraJSample{end}, 3);
-%              meanJOverLastTrlLastSetPlot = reshape(sqrt(sum(nUnitsAll)) * meanJOverLastTrlLastSet, sum(nUnitsAll)^2, 1);
-%          end
-%          
-%          save([RNNSampleDir, 'classifier_matrices_IntraOnly', monkey, ssnDate, ...
-%              '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
-%          
-%          save([RNNSampleDir, 'classifier_matrices_resh_IntraOnly', monkey, ssnDate, ...
-%              '_set', num2str(iSet), '.mat'], 'activitySample', 'intraJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
-%                   
-%          save([RNNSampleDir, 'classifier_matrices_InterOnly', monkey, ssnDate, ...
-%              '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSample', 'trlIDsCurrSet', 'iSet', '-v7.3')
-%          
-%          save([RNNSampleDir, 'classifier_matrices_resh_InterOnly', monkey, ssnDate, ...
-%              '_set', num2str(iSet), '.mat'], 'activitySample', 'interJSampleResh', 'trlIDsCurrSet', 'iSet', '-v7.3')
-%          
-%      end
-    
-%     % plot histograms of Js
-%     figure,
-%     [JHistCounts,edgesnew] = histcounts(meanJOverLastTrlFirstSetPlot, 75);
-%     histcenters = edgesnew(1:end-1) + (diff(edgesnew) ./ 2);
-%     % normalizing each by area under curve
-%     semilogy(histcenters,JHistCounts./sum(JHistCounts), 'o-', 'color', [0.12, 0.56, 1], 'linewidth', 1.5, 'markersize', 1.5)
-%     [JHistCounts,edgesnew] = histcounts(meanJOverLastTrlLastSetPlot, 75);
-%     histcenters = edgesnew(1:end-1) + (diff(edgesnew) ./ 2);
-%     hold on, semilogy(histcenters,JHistCounts./sum(JHistCounts), 'o-', 'color', [0 0 1], 'linewidth', 1.5, 'markersize', 1.5)
-%     set(gca, 'fontsize', 13, 'ylim', [0.0001 1], 'xlim', [-20 20])
-%     xlabel('Weight')
-%     ylabel('Density')
-%     lgd = legend({'first set', 'last set'}, 'location', 'northeast');
-%     print(gcf, '-dtiff', '-r400', [RNNfigdir, 'intraRgnDeltaJs_consecutiveSamplesSingleTrl', filesep, monkey, ssnDate, '_firstLastHists']),
-%     close     
-%            
-%     meanFRAcrossTrls = mean(cell2mat(arrayfun(@(iTrl) mean(activitySampleAll{iTrl}, 1), 1 : nTrls, 'un', false)'), 1);
-%     stdFRAcrossTrls = mean(cell2mat(arrayfun(@(iTrl) std(activitySampleAll{iTrl}, [], 1), 1 : nTrls, 'un', false)'), 1); % std over all units, averaged over all trials
-%     
-    %% IMSHOW DELTA J (INTRA ONLY) BETWEEN SAMPLES IN A SINGLE TRIAL
-    
-%     tmpInds = find(trlInfo.trls_since_nov_stim == 0);
-%     
-%     while trlInfo.nov_stim_rwd_prob(tmpInds(setToPlot - 1)) == 999
-%         setToPlot = setToPlot + 1; % move down sets until the last one of prev trial is 999 (get it at most novel part of session
-%     end
-%     
-%     trlToPlot = tmpInds(setToPlot); % first trial of first full set (where the three stimuli on the screen have not yet been learned) - TO DO: is set 1 or set 2 more appropriate?
-%     
-%     subT = trlInfo(trlToPlot, :); % to cross reference and make sure you're pulling Js from the trials you want
-%     assert(sum(subT.trls_since_nov_stim == 0) == 1) % should only be one instance of novel stim appearing
-% 
-%     eventInds = round(subT.aligned_event_times / dtData); % fixation, stim, choice, outcome (relative to fixation)
-%     sampleEventInds = eventInds(2 : end) - eventInds(2) + 1; % stim, choice, outcome (relative to sample inds for J which start from stim)
-%     sampleInds = sampleTimePoints - sampleTimePoints(1) + 1; % relative to stim
-%     
-%     % find closest match between sampleEventInds and sampleTimePoints
-%     eventPos = arrayfun(@(iEvent) find(abs(sampleInds - sampleEventInds(iEvent)) == min(abs(sampleInds - sampleEventInds(iEvent)))), 1 : length(sampleEventInds));
-%     eventLabel = {'stim', 'choice', 'outcome'};
-%     
-%     cm = brewermap(100, '*RdBu');
-%     nDSamples = nSamples - 1;
-%     if ~isfolder([RNNfigdir, 'intraRgnDeltaJs_consecutiveSamplesSingleTrl', filesep])
-%         mkdir([RNNfigdir, 'intraRgnDeltaJs_consecutiveSamplesSingleTrl', filesep])
-%     end
-%     
-%     figT = figure('color','w');
-%     AxT = arrayfun(@(i) subplot(sum(rgnIxToPlot & ~badRgn), nDSamples, i, 'NextPlot', 'add', 'Box', 'on', 'BoxStyle', 'full', 'linewidth', 1, ...
-%         'xtick', '', 'xticklabel', '', ...
-%         'ytick', '', 'ydir', 'reverse'), 1:((sum(rgnIxToPlot & ~badRgn) * nDSamples)));
-%     set(gcf, 'units', 'normalized', 'outerposition', [0 0.1 1 0.9])
-%     count = 1;
-%     eventCount = 1;
-%     dJ_consecutive = [];
-%     colormap(cm)
-%     
-%     for iRgn = find(rgnIxToPlot & ~badRgn) + 1
-%         if ~ismember(iRgn - 1, find(rgnIxToPlot)) || ismember(iRgn - 1, find(badRgn))
-%             continue
-%         end
-%         
-%         in_rgn = newRgnInds(iRgn - 1) + 1 : newRgnInds(iRgn);
-%         nUnitsRgn = numel(in_rgn);
-%         
-%         % get difference matrix (changes in intraregional J) for desired trials
-%         deltaIntraRgnConsJ = diff(cell2mat(arrayfun(@(iTrl) intraJ{iTrl}(in_rgn, in_rgn, :), trlToPlot, 'un', 0)), 1, 3);
-%         
-% 
-%         % try to sort on descending max mean value based
-%         % on last delta
-%         deltaToSort = squeeze(deltaIntraRgnConsJ(:, :, 1));
-%         
-%         [~, preSynSort] = sort(mean(deltaToSort, 1), 'descend');
-%         [~, postSynSort] = sort(mean(deltaToSort, 2), 'descend');
-%         
-%         % reshape for PCA
-%         deltaConsJResh = cell2mat(arrayfun(@(iSample) ...
-%             reshape(squeeze(deltaIntraRgnConsJ(:, :, iSample)), 1, nUnitsRgn^2), 1 : nDSamples, 'un', false)');
-%         
-%         % test for unreshaping
-%         deltaJConsUnresh = reshape(deltaConsJResh(1, :), [nUnitsRgn, nUnitsRgn]);
-%         assert(isequal(squeeze(deltaIntraRgnConsJ(:, :, 1)), deltaJConsUnresh))
-%         
-%         for i = 1 : nDSamples
-%             
-%             J_delta = squeeze(deltaIntraRgnConsJ(:, :, i)); % J_curr - J_prev;
-%             
-%             % rearrange to try to find potential structure in terms of
-%             % changes
-%             J_delta = J_delta(postSynSort, postSynSort); % makes sense to look at this since that's what gets changed....
-%             
-%             dJ_consecutive = [dJ_consecutive; J_delta(:)];
-%             subplot(AxT(count)), imagesc(J_delta); axis tight
-%             
-%             pos = get(AxT(count), 'position');
-%             pos(3) = 1 ./ (1.25 * nDSamples);% 1.2 * pos(3); % adjust width
-%             
-%             if count > 1
-%                 prev_pos = get(AxT(count - 1), 'position');
-%             end
-%             
-%             if mod(count - 1, nDSamples) == 0 || count == 1
-%                 pos(1) = 0.2 * pos(1); % first plot of a row moves to L
-%             else
-%                 pos(1) = prev_pos(1) + prev_pos(3) + 0.2*pos(3); % adjust L position based on width of plots in earlier row
-%             end
-%             
-%             set(AxT(count), 'position', pos)
-%             
-%             if count == 1
-%                 presynLbl = text(AxT(count), round(nUnitsRgn/3), round(-1 * nUnitsRgn/12.5), 'pre-syn', 'fontsize', 10, 'fontweight', 'bold');
-%                 postsynLbl = text(AxT(count), round(1.08*nUnitsRgn), round(nUnitsRgn/3), 'post-syn', 'fontsize', 10, 'fontweight', 'bold');
-%                 set(postsynLbl, 'rotation', 270, 'horizontalalignment', 'left')
-%             end
-%             
-%             if i == 1
-%                 ylabel([rgnLabels{iRgn - 1}, ' (', num2str(nUnitsRgn), ' units)'], 'fontweight', 'bold', 'fontsize', 13)
-%                 set(get(AxT(count), 'ylabel'), 'rotation', 90, 'horizontalalignment', 'center')
-%             end
-%             
-%             if count >= length(AxT) - (nDSamples) + 1
-%                 if ismember(i, eventPos)
-%                     xlabel({[num2str(i + 1) '\Delta', num2str(i)]; ['(' eventLabel{eventCount} ')']}, 'fontsize', 12, 'fontweight', 'bold')
-%                     eventCount = eventCount + 1;
-%                 else
-%                     xlabel([num2str(i + 1), '\Delta', num2str(i)], 'fontsize', 12, 'fontweight', 'bold')
-%                 end
-%             end
-%             
-%             count = count + 1;
-%             
-%         end
-%     end
-%     
-%     % update clims for the last three
-%     [~, L, U] = isoutlier(dJ_consecutive, 'percentile', [0.5 99.5]);
-%     
-%     newCLims = [-1 * round(max(abs([L, U])), 5, 'decimals'), round(max(abs([L, U])), 5, 'decimals')];
-%     set(AxT, 'clim', newCLims),
-%     titleAxNum = round(0.5*(nDSamples));
-%     text(AxT(titleAxNum ), -300, -15, ...
-%         [monkey, ssnDate,': consecutive within-trl \DeltaJs trl=', num2str(trlToPlot), ', ([0.5 99.5] %ile shown (range=\Delta +/-', num2str(newCLims(2), '%.1e'), ') --- SORTED ON: 1st \Delta (postsyn)'], 'fontweight', 'bold', 'fontsize', 14)
-%     
-%     set(figT, 'currentaxes', AxT),
-%     print(figT, '-dtiff', '-r400', [RNNfigdir, 'intraRgnDeltaJs_consecutiveSamplesSingleTrl', filesep, monkey, ssnDate, '_intraRgnDeltaJs_withinFirstTrl']),
-%     close(figT)
-%     %% WIP: PCA on consecutive intraregion Js (all samples, all trials)
-%     
-%     intraRgnConsJToPlot = intraJ; 
-%     intraRgnConsJToPlot = cat(3, intraRgnConsJToPlot{:});
-%     intraJAllResh = cell2mat(arrayfun(@(i) reshape(squeeze(intraRgnConsJToPlot(:, :, i)), 1, sum(nUnitsAll)^2), 1 : (nTrls * nSamples), 'un', false)');
-%     
-%     jMean = mean(intraJAllResh, 1); % mean(cell2mat(arrayfun(@(iTrl) mean(cell2mat(intraRgnConsJResh{iTrl}'), 1), 1 : nTrls, 'un', 0)'), 1);
-%     [~, upperJ_cutoff, lowerJ_cutoff, C] = isoutlier(jMean(jMean~=0), 'percentile', [47.5 52.5]); % remove middle 5% of elements from the mean of all Js (all samples all trials)
-%     
-%     % remove middle 5% average of weights
-%     rmEls = jMean > upperJ_cutoff & jMean < lowerJ_cutoff;
-%     intraJReshCulled = intraJAllResh;
-%     intraJReshCulled(:, rmEls) = [];
-%     
-%     [w, scores, eigen, ~, pvar, mu] = pca(intraJReshCulled, 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
-%     projData = intraJReshCulled;
-%     tempProj = (projData - repmat(mu,size(projData,1),1)) * w;
-%     x = tempProj;
-%     
-%     figure('color', 'w'); hold on
-%     set(gcf, 'units', 'normalized', 'outerposition', [0.25 0.1 0.5 0.8])
-%     cm = colormap(cool);
-%     colormap(cm)
-%     plot3(x(:, 1), x(:, 2), x(:, 3), 'color', [0.66 0.66 0.66], 'linewidth', 2)
-%     plot3(x(1 : nSamples : end, 1), x(1 : nSamples : end , 2), x(1 : nSamples : end, 3), 'linestyle', 'none', 'marker', 'o', 'markersize', 8, 'markeredgecolor', [0 0 0.2], 'markerfacecolor', 'w')
-%     set(gca, 'fontweight', 'bold', 'fontsize', 13)
-%     xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
-%     grid minor
-%     view(3)
-% 
-%     %
-%             
-%     figE = figure('color','w');
-%     set(gcf, 'units', 'normalized', 'outerposition', [0.1 0 0.8 1])
-%     AxE = arrayfun(@(i) subplot(nRegions/2, 2, i, 'NextPlot', 'add', 'fontweight', 'bold', 'fontsize', 12, ...
-%         'linewidth', 1.5, 'ylim', [0 110]), 1 : nRegions - sum(badRgn));
-%     
-%     figP = figure('color', 'w'); hold on
-%     set(gcf, 'units', 'normalized', 'outerposition', [0.1 0 0.8 1])
-%     AxP = arrayfun(@(i) subplot(nRegions/2, 2, i, 'NextPlot', 'add', 'fontweight', 'bold', 'fontsize', 12, ...
-%         'linewidth', 1.5), 1 : nRegions - sum(badRgn));
-%     
-%     count = 1;
-%     
-%     subJReshAll = [];
-%     wRgns = cell(numel(find(~badRgn)), 1);
-%     pjnRgns = cell(numel(find(~badRgn)), 1);
-%     
-%     for iRgn = find(~badRgn)
-%         
-%         in_rgn = newRgnInds(iRgn) + 1 : newRgnInds(iRgn + 1);
-%         
-%         nUnitsRgn = numel(in_rgn);
-%         assert(isequal(nUnitsRgn, nUnitsAll(iRgn)))
-%         
-%         subJ = intraRgnConsJToPlot(in_rgn, in_rgn, :); % all trials, all samples, intraRgn for a given region
-%         
-%         % reshape for PCA
-%         subJResh = cell2mat(arrayfun(@(iTrl) ...
-%             reshape(squeeze(subJ(:, :, iTrl)), 1, nUnitsRgn^2), 1 : size(subJ, 3), 'un', false)');
-%       
-%         subJReshAll = [subJReshAll, subJResh];
-%         
-%         % test for unreshaping
-%         assert(isequal(squeeze(subJ(:, :, 1)), reshape(subJResh(1, :), [nUnitsRgn, nUnitsRgn])))
-%         
-%         % coeffs from all elements of J for each delta
-%         [w, scores, eigen, ~, pvar, mu] = pca(subJResh, 'Algorithm', 'svd', 'Centered', center_data, 'Economy', 0);
-%         
-%         wRgns{iRgn} = w;
-%         
-%         % project each regional subspace onto all data
-%         pjnRgns{iRgn} = (subJResh - repmat(mu,size(subJResh,1),1)) * w;
-%         
-%         % estimate effective dimensionality
-%         set(0, 'currentfigure', figE);
-%         subplot(AxE(count)), plot(1 : length(eigen), cumsum(pvar), 'linewidth', 1.5, 'color', 'b')
-%         grid minor, xlabel('# PCs (5% of actual total)'), ylabel('% var explained')
-%         xlim(AxE(count), [1 0.05 * round(size(subJResh, 2))])
-%         nPC_cutoff = find(cumsum(pvar) >= 99,1, 'first');
-%         line(gca, [nPC_cutoff nPC_cutoff], get(gca, 'ylim'), 'linestyle', '--', 'linewidth', 1.5, 'color', 'k')
-%         text(gca, round(1.2 * nPC_cutoff), 10, ['#PCs = ', num2str(nPC_cutoff)], 'fontweight', 'bold')
-%         title(AxE(count), rgnLabels{iRgn})
-%         
-%         % project  Js back into low D space 
-%         projData = subJResh;
-%         tempProj = (projData - repmat(mu,size(projData,1),1)) * w;
-%         x = tempProj;
-%         set(0, 'currentfigure', figP);
-%         subplot(AxP(count)),
-%         plot3(x(:, 1), x(:, 2), x(:, 3), 'linestyle', rgnLinestyle{iRgn}, 'color', rgnColors(iRgn, :), 'linewidth', 1.75)
-%         plot3(x(nSamples : nSamples : end - nSamples, 1), x(nSamples : nSamples : end - nSamples, 2), x(nSamples : nSamples : end - nSamples, 3), 'linestyle', 'none', 'marker', 'o', 'markersize', 6, 'markeredgecolor', 'k', 'markerfacecolor', rgnColors(iRgn, :))
-%         plot3(x(1, 1), x(1, 2), x(1, 3), 'linestyle', 'none', 'marker', 'd', 'markersize', 12, 'markeredgecolor', 'k', 'markerfacecolor', rgnColors(iRgn, :))
-%         plot3(x(end, 1), x(end, 2), x(end, 3), 'linestyle', 'none', 'marker', 's', 'markersize', 12, 'markeredgecolor', 'k', 'markerfacecolor', rgnColors(iRgn, :))
-%         title(AxP(count), rgnLabels{iRgn})
-%         xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
-%         grid minor
-%         view(3)
-%         
-%         count = count + 1;
-%     end
-%     
-%     % Low D projection
-%     if ~isfolder([RNNfigdir, 'topPCsIntraRgnJs_consecutive', filesep])
-%         mkdir([RNNfigdir, 'topPCsIntraRgnJs_consecutive', filesep])
-%     end
-%     
-%     set(0, 'currentfigure', figP);
-%     xL = max(max(abs(cell2mat(get(AxP, 'xlim')))));
-%     yL = max(max(abs(cell2mat(get(AxP, 'ylim')))));
-%     zL = max(max(abs(cell2mat(get(AxP, 'zlim')))));
-%     set(AxP, 'xlim', [-xL xL], 'ylim', [-yL yL], 'zlim', [-zL zL])
-%     text(AxP(1), 3.5 * max(get(AxP(1), 'xlim')), 3.5 * max(get(AxP(1), 'ylim')), [monkey, ssnDate, ': consecutive Js (#trials=', num2str(size(subJ, 3)), ') projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
-%     print('-dtiff', '-r400', [RNNfigdir, 'topPCsIntraRgnJs_consecutive', filesep, monkey, ssnDate, '_topPCsIntraRgnJs_consecutive'])
-%     close
-%     
-%     
-%     % Effective dimensionality
-%     if ~isfolder([RNNfigdir, 'effDimIntraRgnJs_consecutive', filesep])
-%         mkdir([RNNfigdir, 'effDimIntraRgnJs_consecutive', filesep])
-%     end
-%     
-%     set(0, 'currentfigure', figE);
-%     text(AxE(1), 0.75 * max(get(AxE(1), 'xlim')), 130, [monkey, ssnDate, ': eff dim (99% var exp) for consecutive Js (#trials=', num2str(size(subJ, 3)), ')'], 'fontsize', 14, 'fontweight', 'bold')
-%     print('-dtiff', '-r400', [RNNfigdir, 'effDimIntraRgnJs_consecutive', filesep, monkey, ssnDate, '_effDimIntraRgnJs_consecutive'])
-%     close
-%     
-% 
-%     % same as above but all in one axes and without centering
-%     figure('color','w'); hold on,
-%     set(gcf, 'units', 'normalized', 'outerposition', [0.2 0.15 0.6 0.7])
-%     set(gca, 'fontweight', 'bold', 'fontsize', 13)
-%     
-%     for iRgn = find(~badRgn)
-%         PC1 = pjnRgns{iRgn}(:, 1);
-%         PC2 = pjnRgns{iRgn}(:, 2);
-%         PC3 = pjnRgns{iRgn}(:, 3);
-%         
-%         %PC1 = PC1 - PC1(1);
-%         %PC2 = PC2 - PC2(1);
-%         %PC3 = PC3 - PC3(1);
-%         all_lines(iRgn) = plot3(PC1,PC2,PC3, 'linestyle', rgnLinestyle{iRgn}, 'color', rgnColors(iRgn, :), 'linewidth', 1.75);
-%         plot3(PC1(1, :), PC2(1, :), PC3(1, :), 'linestyle', 'none', 'marker', 'd', 'markersize', 10, 'markeredgecolor', 'k', 'markerfacecolor', rgnColors(iRgn, :))
-%         plot3(PC1(end, :), PC2(end, :), PC3(end, :), 'linestyle', 'none', 'marker', 's', 'markersize', 10, 'markeredgecolor', 'k', 'markerfacecolor', rgnColors(iRgn, :))
-%         
-%     end
-%     
-%     set(gca, 'xlim', [-xL xL], 'ylim', [-yL yL], 'zlim', [-zL zL])
-%     grid minor
-%     view(3)
-%     xlabel('PC 1'), ylabel('PC 2'), zlabel('PC 3')
-%     title(gca, [monkey, ssnDate, ': consecutive Js (#trials=', num2str(size(subJReshAll, 1)), ') projected into top 3 PCs'], 'fontsize', 14, 'fontweight', 'bold')
-%     legend(all_lines, rgnLabels(~badRgn), 'location', 'bestoutside')
-%     print('-dtiff', '-r400', [RNNfigdir, 'topPCsIntraRgnJs_consecutive', filesep, monkey, ssnDate, '_topPCsIntraRgnJs_consecutive_v2'])
-%     close
-%     
-    % try PCA on full J for consecutive trials
-    %     nUnits = size(intraRgnJ, 1);
-    %     consecutiveJ = intraRgnJ(:, :, trlsToPlot);
-    %     consecutiveJMean = mean(consecutiveJ, 3);
-    %     rmElementsFull = (consecutiveJMean > upperJ_cutoff & consecutiveJMean < lowerJ_cutoff);
-    %
-    %     consecutiveJResh = cell2mat(arrayfun(@(iTrl) ...
-    %         reshape(squeeze(consecutiveJ(:, :, iTrl)), 1, nUnits^2), 1 : size(consecutiveJ, 3), 'un', false)');
-    %
-    %     % remove a bunch of elements
-    %     consecutiveJResh(:, rmElementsFull) = [];
-    
 
     
 
