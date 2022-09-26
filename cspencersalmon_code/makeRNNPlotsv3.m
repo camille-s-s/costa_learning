@@ -475,9 +475,9 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
     
     % set up subsampling of J, R, CURBD over a fixed duration and number of trials (fixed across monkeys and recording days) 
     if latestSet <= setID(nTrls)
-        setsToPlot = floor(linspace(2, latestSet, 10));
+        setsToPlot = floor(linspace(2, latestSet, 20));
     else
-        setsToPlot = floor(linspace(2, setID(nTrls), 10));
+        setsToPlot = floor(linspace(2, setID(nTrls), 20));
     end
     
     allTrlIDs = cell2mat(arrayfun(@(iSet) find(setID == iSet, minTrlsPerSet), setsToPlot, 'un', 0)');
@@ -498,7 +498,7 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
     RAllHistCenters = RAllHistEdges(1 : end - 1) + (diff(RAllHistEdges) ./ 2);
     RAllHistCounts = histcounts(mean(R_allsets_trunc_mat, 3), RAllHistEdges);
     
-    % TRIAL-AVERAGED OVER ALL SUBSAMPLED TRIALS: J and R HISTS
+    %% TRIAL-AVERAGED OVER ALL SUBSAMPLED TRIALS: J and R HISTS
     figure('color', 'w');
     set(gcf, 'units', 'normalized', 'outerposition', [0.2 0 0.4 1])
     subplot(2, 1, 1),
@@ -514,7 +514,7 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
     print('-dtiff', '-r400', [histFigDir, 'J_and_act_avgd_', figNameStem])
     close
     
-    % set up CURBD avg over sets plot
+    %% set up CURBD avg over sets plot
     R_allsets_trunc = cell2mat(R_allsets_trunc_cell'); % (minTrlsPerSet * nSetsToPlot) x 1 array
     inds_allsets_trunc = [1; cumsum(repmat(shortestTrl, length(allTrlIDs), 1)) + 1]';
     [CURBD_allsets, CURBD_allsets_exc, CURBD_allsets_inh, ...
@@ -524,15 +524,15 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
     avgCURBD_mean = cell2mat(arrayfun(@(i) mean(avgCURBD_resh{i}, 1), 1 : nRegionsCURBD^2, 'un', 0)');
     CURBDYLims = 0.05; % max(abs(avgCURBD_mean(:))); % max(abs(prctile(avgCURBD_mean(:), [0.5 99.5])));
     
-    % TRIAL-AVERAGED MEAN CURRENT CURBD PLOT (ALL SETS)
+    %% TRIAL-AVERAGED MEAN CURRENT CURBD PLOT (ALL SETS)
     figure('color', 'w');
     set(gcf, 'units', 'normalized', 'outerposition', [0 0 1 1])
     count = 1;
     xTks = round(linspace(1, shortestTrl, 5)); % these will be trial averaged sample points
-    axLPos = linspace(0.04, 0.85, nRegionsCURBD);
-    axBPos = linspace(0.9, 0.07, nRegionsCURBD);
-    axWPos = 0.09;
-    axHPos = 0.08;
+    axLPos = linspace(0.03, 0.85, nRegionsCURBD);
+    axBPos = linspace(0.875, 0.06, nRegionsCURBD);
+    axWPos = 0.095;
+    axHPos = 0.095;
     
     for iTarget = 1 : nRegionsCURBD
         nUnitsTarget = numel(curbdRgns{iTarget, 2});
@@ -557,23 +557,31 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
             end
             
             if iSource == 1
-                ylabel([curbdRgns{iTarget, 1}(1 : end - 3), '(', num2str(nUnitsTarget), ')'], 'fontweight', 'bold');
+                ylbl = ylabel([curbdRgns{iTarget, 1}(1 : end - 3), '(', num2str(nUnitsTarget), ')'], 'fontweight', 'bold');
+                ylbl.Position = [-44.5, 0, -1];
+            end
+            
+            if iSource == 1 && iTarget == nRegionsCURBD
+                set(gca, 'ytick', [-1 * CURBDYLims, 0, CURBDYLims])
+                ytickangle(90)
             else
                 set(gca, 'ytick', '')
             end
 
             set(gca, 'position', [axLPos(iSource), axBPos(iTarget), axWPos, axHPos])
+            oldOPos = get(gca, 'OuterPosition');
+            set(gca, 'OuterPosition', [1.01 * oldOPos(1), 1.01 * oldOPos(2), 0.99 * oldOPos(3), 0.99 * oldOPos(4)])
             title([curbdRgns{iSource, 1}(1 : end - 3), ' > ', curbdRgns{iTarget, 1}(1 : end - 3)], 'fontweight', 'bold');
         end
     end
     
-    text(gca, -60, -1.5 * CURBDYLims, [monkey, ssnDate, ' CURBD (trial averaged)'], 'fontsize', fontSzL, 'fontweight', 'bold')
+    text(gca, -60, -1.5 * CURBDYLims, [monkey, ssnDate, ' CURBD (trial averaged)'], 'fontsize', fontSzM, 'fontweight', 'bold')
     cm = brewermap(250,'*RdBu');
     colormap(cm)
     print('-dtiff', '-r400', [CURBDFigDir, 'CURBD_avgd_', figNameStem])
     close
     
-    % TRIAL-AVERAGED MEAN CURRENT CURBD PLOT (ALL SETS, EXC)
+    %% TRIAL-AVERAGED MEAN CURRENT CURBD PLOT (ALL SETS, EXC)
     figure('color', 'w');
     set(gcf, 'units', 'normalized', 'outerposition', [0 0 1 1])
     count = 1;
@@ -606,10 +614,14 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
             
             if iSource == 1
                 ylabel([curbdRgns{iTarget, 1}(1 : end - 3), '(', num2str(nUnitsTarget), ')'], 'fontweight', 'bold');
+            end
+            
+            if iSource == 1 && iTarget == nRegionsCURBD
+                set(gca, 'ytick', [-1 * CURBDYLims, 0, CURBDYLims])
             else
                 set(gca, 'ytick', '')
             end
-
+            
             set(gca, 'position', [axLPos(iSource), axBPos(iTarget), axWPos, axHPos])
             title([curbdRgns{iSource, 1}(1 : end - 3), ' > ', curbdRgns{iTarget, 1}(1 : end - 3)], 'fontweight', 'bold');
         end
@@ -621,7 +633,8 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
     print('-dtiff', '-r400', [CURBDFigDir, 'CURBD_avgd_exc_inh_', figNameStem])
     close
     
-    % OVER SET HISTS: set up histogram plotting
+    %% OVER SETS: set up histogram and CURBD plotting
+    
     JHistCounts = NaN(length(setsToPlot), nBins);
     RHistCounts = NaN(length(setsToPlot), nBins);
     
@@ -711,7 +724,7 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
         clear interJSample intraJSample activitySample
     end
     
-    % TRIAL-AVERAGED (SPLIT BY SET) J HISTOGRAMS RE-FORMATTING (EACH SET)
+    %% TRIAL-AVERAGED (SPLIT BY SET) J HISTOGRAMS RE-FORMATTING (EACH SET)
     histFig = figure('color', 'w');
     set(gcf, 'units', 'normalized', 'outerposition', [0.2 0 0.4 1])
     
@@ -736,6 +749,8 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
     
     print('-dtiff', '-r400', [histFigDir, 'J_and_act_over_sets_', figNameStem])
     close
+    
+    %% CURBD OVER SETS
     
     figure('color', 'w');
     set(gcf, 'units', 'normalized', 'outerposition', [0 0 1 1])
@@ -773,6 +788,10 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
             
             if iSource == 1
                 ylabel([curbdRgns{iTarget, 1}(1 : end - 3), '(', num2str(nUnitsTarget), ')'], 'fontweight', 'bold');
+            end
+            
+            if iSource == 1 && iTarget == nRegionsCURBD
+                set(gca, 'ytick', [-1 * CURBDYLims, 0, CURBDYLims])
             else
                 set(gca, 'ytick', '')
             end
