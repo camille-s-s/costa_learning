@@ -3,8 +3,10 @@ function [CURBD, CURBD_exc, CURBD_inh, trlAvgCURBD, trlAvgCURBD_exc, trlAvgCURBD
 % NEED: curbdRgns, inds_set, J_set, R_set, minTrlsPerSet, tData_set
 
 % loop along all bidirectional pairs of regions
-nRegionsCURBD = sum(~cellfun(@isempty, curbdRgns(:, 2)));
-curbdRgns = curbdRgns(~cellfun(@isempty, curbdRgns(:, 2)), :);
+% nRegionsCURBD = sum(~cellfun(@isempty, curbdRgns(:, 2)));
+% curbdRgns = curbdRgns(~cellfun(@isempty, curbdRgns(:, 2)), :);
+nRegionsCURBD = sum(cellfun(@numel, curbdRgns(:, 2)) >= 5);
+curbdRgns = curbdRgns(cellfun(@numel, curbdRgns(:, 2)) >= 5, :); % raise cutoff for CURBD rgns
 
 CURBD = cell(nRegionsCURBD, nRegionsCURBD);
 CURBD_exc = cell(nRegionsCURBD, nRegionsCURBD);
