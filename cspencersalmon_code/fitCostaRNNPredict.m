@@ -38,6 +38,7 @@ nRunTrain       = 1000;
 nRunTest        = 1;                    % TO DO: IDK HOW MUCH TO TEST?!?!
 trainFromPrev   = false;                % assume you're starting from beginning, but if not, feed in previous J
 trainRNN        = true;                 % true by default until it's not!
+
 %% output options
 plotStatus      = true;
 saveMdl         = true;
@@ -75,105 +76,46 @@ end
 
 % set up final params
 dtRNN           = dtData / dtFactor;    % time step (in s) for integration
-ampWN           = sqrt( tauWN / dtRNN );
+% ampWN           = sqrt( tauWN / dtRNN );
 
 %% preprocess targets by smoothing, normalizing, re-scaling, and outlier removing, or load previous
 
 if ~isfile([rnnDir 'exp_data' filesep, RNNname, '_exp_data.mat'])
-    [exp_data, outliers] = preprocess_data_for_RNN_training(allSpikes, doSmooth, rmvOutliers, meanSubtract, doSoftNorm, smoothWidth, dtData, arrayUnit, arrayRgns);   
     
-    % pull trial starts
-    fixOnInds = [find(allEvents == 1), size(exp_data, 2)];
+    [exp_data, outliers, fixOnInds, stimTimeInds, nTrls, nTrlsPerSet, nSets, setID] ...
+        = preprocess_data_for_RNN_training(allSpikes, allEvents, T, ...
+        doSmooth, rmvOutliers, meanSubtract, doSoftNorm, ...
+        smoothWidth, dtData, arrayUnit, arrayRgns);
     
-    % pull event labels by trial (in time relative to start of each trial)
-    stimTimeInds = find(allEvents == 2) - find(allEvents == 1); % (1 = fixation, 2 = stim, 3 = choice, 4 =  outcome, 5 = time of next trl fixation)
-    
-    % sanity check match in #trials
-    assert(isequal(sum(allEvents == 1), height(T)))
-    nTrls =  height(T); % height(T); % TO DO: CHANGE THIS BACK AFTER DEV!
-    
-    % save variables for generating each trial's currTargets, tData, and tRNN
-    save([rnnDir 'exp_data' filesep, RNNname, '_exp_data.mat'],  'exp_data', 'fixOnInds', 'stimTimeInds', 'nTrls', 'outliers', '-v7.3')
+    save([rnnDir 'exp_data' filesep, RNNname, '_exp_data.mat'],  'exp_data', 'outliers', 'fixOnInds', 'stimTimeInds', 'nTrls', 'nTrlsPerSet', 'nSets', 'setID', '-v7.3')
 else
-    load([rnnDir 'exp_data' filesep, RNNname, '_exp_data.mat'], 'exp_data', 'fixOnInds', 'stimTimeInds', 'nTrls', 'outliers');
+    load([rnnDir 'exp_data' filesep, RNNname, '_exp_data.mat'], 'exp_data', 'outliers', 'fixOnInds', 'stimTimeInds', 'nTrls', 'nTrlsPerSet', 'nSets', 'setID');
 end
 
-clearvars allEvents prevMdls allSpikes
+clearvars allEvents prevMdls allSpikes T
 
 % define minimimum trial length so all sampled Js are in same timescale
 if isnan(minLen)
     minLen = min(diff(fixOnInds)); % shortest trial (from fixation to next fixation)
 end
 
-%%  get block/set structure (s sets of j trials each)
-
-nTrlsPerSet = diff([find(T.trls_since_nov_stim == 0); height(T) + 1]); % 2022/03/16 edit
-nSets = sum(T.trls_since_nov_stim == 0); % 2022/03/16 edit
-setID = repelem(1 : nSets, nTrlsPerSet)'; % 2022/03/16 edit
-clearvars T
-
 %% set up for training
 
 nUnits = size(exp_data, 1); % change targets name to like...exp_data so t+1 can be targets
-
-% if the RNN is bigger than training neurons, pick the ones to target (??)
-learnList = 1 : nUnits; % randperm(nUnits);
-iTarget = learnList(1 : nUnits);
-iNonTarget = learnList(nUnits : end);
 
 %% generate train trial ID list (if trained via multiple fcn calls)
 
 % define train/test split
 nTrlsIncluded = 12;
-% nTrlsTrain = round(0.75 * nTrlsIncluded);
-% nTrlsTest = nTrlsIncluded - nTrlsTrain;
-% 
-% if ~isfile([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat']) % initialize list if starting at beginning
-%     subset_trl_IDs = randperm(nTrls, nTrlsIncluded);
-%     train_trl_IDs = subset_trl_IDs(1 : nTrlsTrain); % isequal(all_trl_IDs(ismember(all_trl_IDs, train_trl_IDs)), train_trl_IDs)
-%     test_trl_IDs = subset_trl_IDs(nTrlsTrain + 1 : end); % all_trl_IDs(~ismember(all_trl_IDs, sort(train_trl_IDs)));
-%     save([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat'], 'train_trl_IDs', 'test_trl_IDs')
-%     start_trl_num = 1;
-% else
-%     load([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat'], 'train_trl_IDs', 'test_trl_IDs')
-%     prevMdls = dir([rnnSubDir, RNNname, '_train_trl*_num*.mat']);
-%     trl_IDs_in_dir = arrayfun(@(i) ...
-%         str2double(prevMdls(i).name(strfind(prevMdls(i).name, 'trl') + 3 : strfind(prevMdls(i).name, '_num') - 1)), ...
-%         1 : length(prevMdls));
-%     
-%     % see which of the trial IDs in the train list are already in the directory
-%     last_completed_trl_num = find(~ismember(train_trl_IDs, trl_IDs_in_dir), 1, 'first') - 1;
-%     start_trl_num = last_completed_trl_num + 1;
-% end
-% 
-% % if this trial list has already been partially trained on, load last J
-% 
-% if start_trl_num > 1 % need to load last J if you had already started training on this set of trials!
-%     prevMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, ...
-%         '_train_trl', num2str(train_trl_IDs(last_completed_trl_num)), '_num', num2str(last_completed_trl_num) '.mat']).name]);
-%     prevJ = prevMdl.RNN.mdl.J;
-%     prev_trl_ID = prevMdl.RNN.mdl.train_trl;
-%     assert(prev_trl_ID == train_trl_IDs(last_completed_trl_num))
-%     
-%     % if done training, move on to testing
-% elseif isempty(start_trl_num)
-%     trainRNN = false;
-%     prevMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, ...
-%         '_train_trl', num2str(train_trl_IDs(end)), '_num', num2str(length(train_trl_IDs)) '.mat']).name]);
-%     prevJ = prevMdl.RNN.mdl.J;
-%     prev_trl_ID = prevMdl.RNN.mdl.train_trl;
-%     assert(prev_trl_ID == train_trl_IDs(end))
-% end
-
 [train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN] ...
     = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrls, nTrlsIncluded);
+
 %% TRAINING
 
 if trainRNN == true
     
     % initialize outputs
     stdData = zeros(1, nTrls);
-    JTrls = NaN(nUnits, nUnits, nTrls);
     
     trl_num = start_trl_num;
     
@@ -190,21 +132,13 @@ if trainRNN == true
         inputs = exp_data(:, iStart : iStop - 1);
         targets = exp_data(:, iStart + 1 : iStop);
         
-        tData = allPossTS(iStart : iStop); % timeVec for current data
-        tRNN = tData(1) : dtRNN : tData(end); % timevec for RNN
+        tData = allPossTS(iStart : iStop); nsp_Data = length(tData); % timeVec for current data
+        tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN); % timevec for RNN
         
         % get fixed sample time points for subsampling J's and Rs
         sampleTimePoints = round(linspace(stimTimeInds(iTrlID), stimTimeInds(iTrlID) + minLen, nSamples));
         
-        % set up white noise inputs (from CURBD)
-        iWN = ampWN * randn( nUnits, length(tRNN) );
-        inputWN = ones(nUnits, length(tRNN));
-        
-        for tt = 2 : length(tRNN)
-            inputWN(:, tt) = iWN(:, tt) + (inputWN(:, tt - 1) - iWN(:, tt)) * exp( -(dtRNN / tauWN) );
-        end
-        
-        inputWN = ampInWN * inputWN;
+        % [inputWN] = get_frozen_input_WN(nUnits, ampWN, tauWN, ampInWN, nsp_RNN, dtRNN);
         
         % initialize DI matrix J
         if trainFromPrev && iTrlID == train_trl_IDs(start_trl_num) && exist('prevJ', 'var') && ~isempty(prevJ)
@@ -212,34 +146,32 @@ if trainRNN == true
         else
             if iTrlID == train_trl_IDs(1)
                 J = g * randn(nUnits, nUnits) / sqrt(nUnits);
-            else
-                J = squeeze(JTrls(:, :, trl_num - 1));
             end
         end
         
         J0 = J;
         
         % get standard deviation of entire data that we are looking at
-        stdData(trl_num)  = std(reshape(inputs(iTarget, :), length(iTarget) * (length(tData) - 1), 1));
+        stdData(trl_num)  = std(reshape(inputs, nUnits * (nsp_Data - 1), 1));
         
         % get indices for each sample of model data for getting pVar
-        iModelSample = zeros(length(tData) - 1, 1);
+        iModelSample = zeros(nsp_Data - 1, 1);
         
-        for i = 1 : length(tData) - 1
+        for i = 1 : nsp_Data - 1
             [~, iModelSample(i)] = min(abs(tData(i) - tRNN));
         end
         
         % initialize some others
-        R = zeros(nUnits, length(tRNN)); % rate matrix - firing rates of neurons
+        R = zeros(nUnits, nsp_RNN); % rate matrix - firing rates of neurons
         chi2 = zeros(1, nRunTrain);
         pVars = zeros(1, nRunTrain);
-        JR = zeros(nUnits, length(tRNN)); % z(t) for the output readout unit
+        JR = zeros(nUnits, nsp_RNN); % z(t) for the output readout unit
         
         % initialize learning update matrix (see Sussillo and Abbot, 2009)
         PJ = alpha * eye(nUnits); % dim are pN x pN where p=fraction of neurons to modify - here it's all of them
         
         if plotStatus
-            f = figure('Position', [100 100 1800 600]);
+            f = figure('color', 'w', 'Position', [100 100 1800 600]);
         end
         
         %% training
@@ -255,30 +187,32 @@ if trainRNN == true
             tLearn = 0; % keeps track of current time
             iLearn = 1; % keeps track of last data point learned
             
-            for tt = 2 : length(tRNN) % why start from 2?
+            for t = 2 : nsp_RNN % why start from 2?
                 
                 tLearn = tLearn + dtRNN; % index in actual RNN time
                 
-                R(:, tt) = nonlinearity(H); % compute next RNN step
-                JR(:, tt) = J * R(:, tt) + inputWN(:, tt);
-                H = H + dtRNN * (-H + JR(:, tt)) / tauRNN; % p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
+                R(:, t) = nonlinearity(H); % compute next RNN step
+                % JR(:, t) = J * R(:, t) + inputWN(:, t);
+                JR(:, t) = J * R(:, t) + inputs(:, iLearn); % 2022-09-27 CURRENTLY TESTING INCORPORATING INPUT!
+                H = H + dtRNN * (-H + JR(:, t)) / tauRNN; % p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
                 
                 % update J if the RNN time coincides with a data point
                 if tLearn >= dtData
                     tLearn = 0;
                     
-                    error = R(1 : nUnits, tt) - targets(1 : nUnits, iLearn); % note: targets(:, iLearn) == inputs(:, iLearn + 1)
+                    error = JR(1 : nUnits, t) - targets(1 : nUnits, iLearn); % 2022-09-27 CURRENTLY TESTING!
+                    
                     chi2(nRun) = chi2(nRun) + mean(error.^2); % update chi2 using this error
                     
                     iLearn = iLearn + 1; % update learning index
                     
                     if (nRun <= nRunTrain)
                         
-                        k = PJ * R(iTarget, tt); % N x 1 (update term: sq mdl activity)
-                        rPr = R(iTarget, tt)' * k; % scalar; inv xcorr of ntwk firing rates use xcorr bc when you square something it magnifies the sensitivity to changes
+                        k = PJ * R(:, t); % N x 1 (update term: sq mdl activity)
+                        rPr = R(:, t)' * k; % scalar; inv xcorr of ntwk firing rates use xcorr bc when you square something it magnifies the sensitivity to changes
                         c = 1 / (1 + rPr); % tune learning rate by looking at magnitude of model activity. if big changes in FRs and wanna move quickly/take big steps (aka momentum). as get closer, don't wanna overshoot, so take smaller steps
                         PJ = PJ - c * (k * k'); % use squared firing rates (R * R^T) to update PJ - maybe momentum effect?
-                        J(1 : nUnits, iTarget) = J(1 : nUnits, iTarget) - c * error(1 : nUnits, :) * k'; % update J (pre-syn wts adjusted according to post-syn target)
+                        J(1 : nUnits, :) = J(1 : nUnits, :) - c * error(1 : nUnits, :) * k'; % update J (pre-syn wts adjusted according to post-syn target)
                         
                         if nRun == nRunTrain
                             JLearn(:, :, iLearn) = J; % thenwhen nRun == nRunTrain, compare JLearn2 and JLearn
@@ -288,8 +222,8 @@ if trainRNN == true
                 end
             end
             
-            rModelSample = R(iTarget, iModelSample);
-            pVar = 1 - ( norm(targets(iTarget,:) - rModelSample, 'fro' ) / ( sqrt(length(iTarget) * (length(tData)-1)) * stdData(trl_num)) ).^2;
+            rModelSample = R(:, iModelSample);
+            pVar = 1 - ( norm(targets - rModelSample, 'fro' ) / ( sqrt(nUnits * (nsp_Data - 1)) * stdData(trl_num)) ).^2;
             pVars(nRun) = pVar;
             
             % if final run, save JLearn
@@ -301,42 +235,44 @@ if trainRNN == true
             if plotStatus
                 clf(f);
                 idx = randi(nUnits);
+                
                 subplot(2,4,1); hold on;
-                imagesc(targets(iTarget, :)); colormap(jet), colorbar;
-                axis tight; set(gca, 'clim', [0 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 14),
+                imagesc(targets); colormap(jet), colorbar;
+                axis tight; set(gca, 'clim', [0 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 10),
                 title('targets')
+                
                 subplot(2,4,2); hold on;
-                imagesc(R(iTarget, :)); colormap(jet), colorbar;
-                axis tight; set(gca, 'clim', [0 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 14)
+                imagesc(R); colormap(jet), colorbar;
+                axis tight; set(gca, 'clim', [0 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 10)
                 title('model');
+                
                 subplot(2, 4, [3 4 7 8]); hold all;
-                plot(tRNN, R(iTarget(idx), :), 'linewidth', 1.5);
-                plot(tData(2 : end), targets(iTarget(idx), :), 'linewidth', 1.5);
-                axis tight; set(gca, 'ylim', [-0.1 1], 'Box','off', 'TickDir', 'out', 'FontSize', 14)
+                plot(tRNN, R(idx, :), 'linewidth', 1.5);
+                plot(tData(2 : end), targets(idx, :), 'linewidth', 1.5);
+                axis tight; set(gca, 'ylim', [-0.1 1], 'Box','off', 'TickDir', 'out', 'FontSize', 10)
                 ylabel('activity'); xlabel('time (s)'),
                 legend('model', 'target', 'location', 'eastoutside')
                 title(['run ', num2str(nRun)])
+                
                 subplot(2, 4, 5); hold on;
                 plot(pVars(1 : nRun)); ylabel('pVar');
-                set(gca, 'ylim', [-0.1 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 14);
+                set(gca, 'ylim', [-0.1 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 10);
                 title(['current pVar=', num2str(pVars(nRun), '%.3f')])
+                
                 subplot(2, 4, 6); hold on;
                 plot(chi2(1 : nRun)); ylabel('chi2');
-                set(gca, 'ylim', [-0.1 1], 'Box', 'off','TickDir', 'out', 'FontSize', 14);
+                set(gca, 'ylim', [-0.1 1], 'Box', 'off','TickDir', 'out', 'FontSize', 10);
                 title(['current chi2=', num2str(chi2(nRun), '%.3f')])
                 drawnow;
             end
         end
         
-        % get elapsed time
-        toc
-        
         % save J for next trial (in trl_num (indices) order
-        JTrls(:, :, trl_num) = J;
+        % JTrls(:, :, trl_num) = J;
         
         % package up and save outputs at the end of training for each link
         RNN = struct;
-
+        
         currentParams = struct( ...
             'doSmooth',             doSmooth, ...
             'smoothWidth',          smoothWidth, ...
@@ -382,10 +318,7 @@ if trainRNN == true
             'sampleTimePoints',     sampleTimePoints, ...
             'chi2',                 chi2, ...
             'pVars',                pVars, ...
-            'stdData',              stdData(trl_num), ...
-            'inputWN',              [], ...
-            'iTarget',              iTarget, ...
-            'iNonTarget',           iNonTarget);
+            'stdData',              stdData(trl_num));
         
         if saveMdl
             save([rnnSubDir, RNNname, '_train_trl', num2str(iTrlID), '_num', num2str(trl_num) '.mat'], 'RNN', '-v7.3')
@@ -394,6 +327,9 @@ if trainRNN == true
         clear RNN fittedConsJ
         trl_num = trl_num + 1;
         close all;
+        
+        % get elapsed time for trial
+        toc
     end
 else
     %% TESTING
@@ -411,7 +347,168 @@ else
     all_final_chi2 = all_chi2(:, end);
     mean_chi2_train = mean(all_final_chi2);
     
-    testCostaRNNPredict;
+    stdData_test = zeros(1, length(test_trl_IDs));
+    
+    start_trl_num = 1;
+    trl_num = start_trl_num;
+    
+    % if condition met showing we're at end of training, J is J from end of
+    % training full training set
+    if ~exist('J', 'var') % at present you run testing and training separately (not in same script call)
+        J_test = prevJ;
+    else
+        keyboard % just to catch potential J inconsistencies
+    end
+    
+    pVars_test = zeros(nTrlsTest, nRunTest);
+    
+    tic
+    
+    for iTrlID = test_trl_IDs(start_trl_num : end) % startTrl : nTrls % TO DO 9/1/2022 CHANGE FOR LOOP TO DO TRAIN TRIALS DIFFERNETLY
+        
+        fprintf('\n')
+        disp([RNNname, ': testing trial ', num2str(iTrlID), ', #=', num2str(trl_num), '.'])
+        
+        iStart = fixOnInds(iTrlID); % start of trial
+        iStop = fixOnInds(iTrlID + 1) - 1; % right before start of next trial
+        
+        inputs = exp_data(:, iStart : iStop - 1);
+        targets = exp_data(:, iStart + 1 : iStop);
+        
+        tData = allPossTS(iStart : iStop); nsp_Data = length(tData); % timeVec for current data
+        tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN); % timevec for RNN
+        
+        % set up white noise inputs (from CURBD)
+        % [inputWN] = get_frozen_input_WN(nUnits, ampWN, tauWN, ampInWN, nsp_RNN, dtRNN);
+        
+        % get standard deviation of entire data that we are looking at
+        stdData_test(trl_num)  = std(reshape(inputs, nUnits * (nsp_Data - 1), 1));
+        
+        % get indices for each sample of model data for getting pVar
+        iModelSample = zeros(nsp_Data - 1, 1);
+        
+        for i = 1 : nsp_Data - 1
+            [~, iModelSample(i)] = min(abs(tData(i) - tRNN));
+        end
+        
+        % initialize some others
+        R_test = zeros(nUnits, nsp_RNN); % rate matrix - firing rates of neurons
+        chi2_test = zeros(1, length(inputs));
+        JR_test = zeros(nUnits, nsp_RNN); % z(t) for the output readout unit
+        
+        if plotStatus
+            f = figure('color', 'w', 'Position', [100 100 1800 600]);
+        end
+        
+        % loop through testing runs
+        for nRun = 1 : nRunTest
+            
+            H = inputs(:, 1); % seed with start of test data set
+            R_test(:, 1) = nonlinearity(H); % convert to currents through nonlinearity
+            
+            tLearn = 0; % keeps track of current time
+            iLearn = 1; % keeps track of last data point learned
+            
+            for t = 2 : nsp_RNN
+                
+                tLearn = tLearn + dtRNN; % index in actual RNN time
+                
+                R_test(:, t) = nonlinearity(H); % compute next RNN step
+                % JR_test(:, tt) = J_test * R_test(:, tt) + inputWN(:, tt);
+                JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % 2022-09-27 CURRENTLY TESTING INCORPORATING INPUT!
+                H = H + dtRNN * (-H + JR_test(:, t)) / tauRNN; % p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
+                
+                if tLearn >= dtData
+                    tLearn = 0;
+                    
+                    % error = R_test(1 : nUnits, tt) - targets(1 : nUnits, iLearn); % note: targets(:, iLearn) == inputs(:, iLearn + 1)
+                    error = JR_test(1 : nUnits, t) - targets(1 : nUnits, iLearn); % 2022-09-27 CURRENTLY TESTING!
+                    
+                    if iLearn == 1
+                        chi2_test(1, iLearn) = mean(error .^ 2);
+                    elseif iLearn > 1
+                        chi2_test(1, iLearn) = chi2_test(1, iLearn - 1) + mean(error .^ 2); % update chi2 using this error
+                    end
+                    
+                    iLearn = iLearn + 1; % update learning index
+                end
+            end
+            
+            rModelSample_test = R_test(:, iModelSample);
+            pVar = 1 - ( norm(targets - rModelSample_test, 'fro' ) / ( sqrt(nUnits * (nsp_Data-1)) * stdData_test(trl_num)) ).^2;
+            pVars_test(trl_num, nRun) = pVar;
+            
+            % plot
+            if plotStatus
+                %                 clf(f);
+                %                 idx = randi(nUnits);
+                %
+                %                 subplot(2,4,1); hold on;
+                %                 imagesc(targets); colormap(jet), colorbar;
+                %                 axis tight; set(gca, 'clim', [0 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 10),
+                %                 title('targets')
+                %
+                %                 subplot(2,4,2); hold on;
+                %                 imagesc(R_test); colormap(jet), colorbar;
+                %                 axis tight; set(gca, 'clim', [0 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 10)
+                %                 title('model');
+                %
+                %                 subplot(2, 4, [3 4 7 8]); hold all;
+                %                 plot(tRNN, R_test(idx, :), 'linewidth', 1.5);
+                %                 plot(tData(2 : end), targets(idx, :), 'linewidth', 1.5);
+                %                 axis tight; set(gca, 'ylim', [-0.1 1], 'Box','off', 'TickDir', 'out', 'FontSize', 10)
+                %                 ylabel('activity'); xlabel('time (s)'),
+                %                 legend('model', 'target', 'location', 'eastoutside')
+                %                 title(['run ', num2str(nRun)])
+                %
+                %                 subplot(2, 4, 5); hold on;
+                %                 plot(pVars_test(1 : nRun)); ylabel('pVar');
+                %                 set(gca, 'ylim', [-0.1 1], 'Box', 'off', 'TickDir', 'out', 'FontSize', 10);
+                %                 title(['current pVar=', num2str(pVars_test(nRun), '%.3f')])
+                %
+                %                 subplot(2, 4, 6); hold on;
+                %                 plot(chi2_test(1 : end)); ylabel('chi2'); xlabel('timestep')
+                %                 set(gca, 'xlim', [1 iLearn - 1], 'Box', 'off','TickDir', 'out', 'FontSize', 10);
+                %                 title(['cumulative chi2=', num2str(chi2_test(iLearn - 1), '%.3f')])
+                %                 drawnow;
+                plotCostaRNNProgress(f, nUnits, targets, R_test, tRNN, tData, nRun, pVars_test, chi2_test, trainRNN)
+            end
+            
+        end
+        
+        final_chi2_test(trl_num) = chi2_test(iLearn - 1);
+        
+        % package up and save outputs at the end of training for each link
+        RNN = struct;
+        
+        RNN.mdl = struct( ...
+            'test_trl',             iTrlID, ...
+            'trl_num',              trl_num, ...
+            'setID',                setID(iTrlID), ...
+            'RMdlSample_test',      rModelSample_test, ...
+            'tRNN',                 [], ...
+            'dtRNN',                dtRNN, ...
+            'exp_data',             [], ...
+            'tData',                [], ...
+            'dtData',               dtData, ...
+            'J_test',               J_test, ...
+            'chi2_test',            chi2_test, ...
+            'pVars_test',           pVars_test, ...
+            'stdData_test',         stdData_test(trl_num), ...
+            'inputWN',              [] );
+        
+        if saveMdl
+            save([rnnSubDir, RNNname, '_test_trl', num2str(iTrlID), '_num', num2str(trl_num) '.mat'], 'RNN', '-v7.3')
+        end
+        
+        clear RNN fittedConsJ JLearnPrev
+        trl_num = trl_num + 1;
+    end
+    
+    toc
+    mean_pVar_test = mean(pVars_test);
+    mean_chi2_test = mean(final_chi2_test);
+    
 end
 
 end
