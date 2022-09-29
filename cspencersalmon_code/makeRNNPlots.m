@@ -16,11 +16,12 @@ nDeltasToPlot   = 5; % for subsampling over whole session
 nD              = 10; % for within one session (assumed to be <= nTrlsPerSet)
 nSamples        = 21; % for within one trial
 setToPlot       = 2; % only one for now - must be 2 or greater to get last trial prev set
+figVer          = ''; % or ''
 
 % in and outdirs
 bd              = '~/Dropbox (BrAINY Crew)/costa_learning/';
-mouseVer        = 'BRAIN_VERSION/';
-mdlDir          = [bd 'models/', mouseVer];
+mouseVer        = ['PINKY_VERSION/'];
+mdlDir          = [bd 'models/', mouseVer, figVer];
 RNNfigdir       = [bd 'figures/', mouseVer];
 RNNSampleDir    = [mdlDir 'model_samples/'];
 spikeInfoPath   = [bd 'reformatted_data/'];
@@ -48,7 +49,7 @@ if setToPlot < 2
     keyboard
 end
 
-for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
+for iFile = 1 % 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     
     fName = allFiles(iFile).name;
     fID = fName(1:strfind(fName, '_') - 1);
@@ -56,7 +57,8 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     ssnDate = fID(2:end);
     cd([mdlDir, monkey, ssnDate, filesep])
     currSsn = dir('rnn_*_set*_trial*.mat');
-        
+    figNameStem = [monkey, ssnDate, '_v3test'];
+    
       allTrialIDs = unique(arrayfun(@(i) ...
         str2double(currSsn(i).name(strfind(currSsn(i).name,'trial') + 5 : end - 4)), 1:length(currSsn)));
     
@@ -180,6 +182,11 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     intraRgnJSampleAll  = cell(nTrls, 1);
     allSPTimePoints     = NaN(nTrls, nSamples);
     
+    % load 'targets', 'fixOnInds', 'allPossTS', 'nTrls'
+    if isfolder([mdlDir 'targets' filesep]) % this directory exists for v3, not previous versions
+        load([mdlDir 'targets' filesep, 'rnn_', monkey, ssnDate, '_targets'], 'targets', 'fixOnInds', 'allPossTS');
+    end
+    
     for i = 1 : nTrls
         
         mdlfnm = dir([mdlDir, monkey, ssnDate, filesep, 'rnn_', monkey, ssnDate, '_set*_trial', num2str(i), '.mat']);
@@ -200,9 +207,24 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
         R_S{i}              = mdl.RMdlSample;
         J_S(:, :, i)        = mdl.J;
         J0_S(:, :, i)       = mdl.J0;
-        D_S{i}              = mdl.targets(iTarget, :);
-        D_U{i}              = mdl.targets;
-        assert(isequal(mdl.targets, D_S{i}(unscramble, :))); % indices from scrambled back to original
+        
+        if isfolder([mdlDir 'targets' filesep])
+            % generate targets separately (they don't get saved with the model
+            % in fitCostaRNNv3)
+            iStart = fixOnInds(i); % start of trial
+            iStop = fixOnInds(i + 1) - 1; % right before start of next trial
+            currTargets = targets(:, iStart:iStop);
+            % tData = allPossTS(iStart:iStop); % timeVec for current data
+            % tRNN = tData(1) : dtRNN : tData(end); % timevec for RNN
+            
+            D_S{i}              = currTargets(iTarget, :);
+            D_U{i}              = currTargets;
+            assert(isequal(D_U{i}, D_S{i}(unscramble, :))); % indices from scrambled back to original
+        else
+            D_S{i}              = mdl.targets(iTarget, :);
+            D_U{i}              = mdl.targets;
+            assert(isequal(mdl.targets, D_S{i}(unscramble, :))); % indices from scrambled back to original
+        end
         
         % collect first and last to assess convergence
         if i == 1
@@ -233,7 +255,7 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
         disp(['running error for this session starting at trl ', num2str(find(pVarsTrls<0, 1)), '! ...'])
     end
     
-    assert(all(arrayfun(@(t) isequal(J0_U(:,:,t+1),J_U(:,:,t)), 1 : nTrls-1)))
+    assert(all(arrayfun(@(t) isequal(J0_U(:, :, t + 1), J_U(:, :, t)), 1 : nTrls - 1)))
     
     %% HOUSEKEEPING: SPATIAL
     
@@ -405,7 +427,7 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     latestSet = setID(lastTrlWithinHr) - 1;
     
     % set up subsampling/plotsof J, R, CURBD over a fixed duration and number of trials (fixed across monkeys and recording days) 
-    setsToPlot = floor(linspace(2, latestSet, 5));
+    setsToPlot = floor(linspace(2, latestSet, 10));
     allTrlIDs = cell2mat(arrayfun(@(iSet) find(setID == iSet, minTrlsPerSet), setsToPlot, 'un', 0)');
     J_allsets = J_U_reordered(:, :, allTrlIDs);
     R_allsets_trunc_cell = arrayfun(@(iTrl) R_U_reordered{iTrl}(:, 1 : shortestTrl), allTrlIDs, 'un', 0);
@@ -443,10 +465,12 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     % set up CURBD avg over sets plot
     R_allsets_trunc = cell2mat(R_allsets_trunc_cell'); % (minTrlsPerSet * nSetsToPlot) x 1 array
     inds_allsets_trunc = [1; cumsum(repmat(shortestTrl, length(allTrlIDs), 1)) + 1]';
-    [CURBD_allsets, avgCURBD_allsets, curbdRgns, nRegionsCURBD] = costaCURBD(J_allsets, R_allsets_trunc, inds_allsets_trunc, curbdRgns, minTrlsPerSet * length(setsToPlot));
+    [CURBD_allsets, CURBD_allsets_exc, CURBD_allsets_inh, ...
+        avgCURBD_allsets, avgCURBD_allsets_exc, avgCURBD_allsets_inh, ...
+        curbdRgns, nRegionsCURBD] = costaCURBD(J_allsets, R_allsets_trunc, inds_allsets_trunc, curbdRgns, minTrlsPerSet * length(setsToPlot));
     avgCURBD_resh = reshape(avgCURBD_allsets, nRegionsCURBD .^ 2, 1); % for getting YLims
     avgCURBD_mean = cell2mat(arrayfun(@(i) mean(avgCURBD_resh{i}, 1), 1 : nRegionsCURBD^2, 'un', 0)');
-    CURBDYLims = max(abs(avgCURBD_mean(:))); % max(abs(prctile(avgCURBD_mean(:), [0.5 99.5])));
+    CURBDYLims = 0.04; % max(abs(avgCURBD_mean(:))); % max(abs(prctile(avgCURBD_mean(:), [0.5 99.5])));
     
     % TRIAL-AVERAGED MEAN CURRENT CURBD PLOT (ALL SETS)
     figure('color', 'w');
@@ -497,6 +521,54 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_CURBD_avgd'])
     close
     
+    % TRIAL-AVERAGED MEAN CURRENT CURBD PLOT (ALL SETS, EXC)
+    figure('color', 'w');
+    set(gcf, 'units', 'normalized', 'outerposition', [0 0 1 1])
+    count = 1;
+    
+    for iTarget = 1 : nRegionsCURBD
+        nUnitsTarget = numel(curbdRgns{iTarget, 2});
+        
+        for iSource = 1 : nRegionsCURBD
+  
+            subplot(nRegionsCURBD, nRegionsCURBD, count);
+            hold all;
+            count = count + 1;
+            
+            popMeanAvgCURBD_exc = mean(avgCURBD_allsets_exc{iTarget, iSource}, 1);
+            patch([1 : shortestTrl, NaN], [popMeanAvgCURBD_exc, NaN], [popMeanAvgCURBD_exc, NaN], ...
+                'linewidth', 1.5, 'EdgeColor', 'interp', 'Marker', '.', 'MarkerFaceColor', 'flat')
+            popMeanAvgCURBD_inh = mean(avgCURBD_allsets_inh{iTarget, iSource}, 1);
+            patch([1 : shortestTrl, NaN], [popMeanAvgCURBD_inh, NaN], [popMeanAvgCURBD_inh, NaN], ...
+                'linewidth', 1.5, 'EdgeColor', 'interp', 'Marker', '.', 'MarkerFaceColor', 'flat')
+            axis tight,
+            line(gca, get(gca, 'xlim'), [0 0], 'linestyle', ':', 'linewidth', 1, 'color', [0.2 0.2 0.2])
+            set(gca, 'ylim', [-3 * CURBDYLims, 3 * CURBDYLims], 'clim', [-3 * CURBDYLims, 3 * CURBDYLims], 'box', 'off', 'tickdir', 'out', 'fontsize', 10)
+            
+            if iTarget == nRegionsCURBD && iSource == 1
+                xlabel('time (s)', 'fontweight', 'bold');
+                set(gca, 'xtick', xTks, 'xticklabel', num2str([(xTks * dtData) - dtData]', '%.1f'))
+            else
+                set(gca, 'xtick', '')
+            end
+            
+            if iSource == 1
+                ylabel([curbdRgns{iTarget, 1}(1 : end - 3), '(', num2str(nUnitsTarget), ')'], 'fontweight', 'bold');
+            else
+                set(gca, 'ytick', '')
+            end
+
+            set(gca, 'position', [axLPos(iSource), axBPos(iTarget), axWPos, axHPos])
+            title([curbdRgns{iSource, 1}(1 : end - 3), ' > ', curbdRgns{iTarget, 1}(1 : end - 3)], 'fontweight', 'bold');
+        end
+    end
+    
+    text(gca, -60, -4 * CURBDYLims, [monkey, ssnDate, ' CURBD (trial averaged)'], 'fontsize', 16, 'fontweight', 'bold')
+    cm = brewermap(250,'*RdBu');
+    colormap(cm)
+    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_CURBD_avgd_exc_inh'])
+    close
+    
     % OVER SET HISTS: set up histogram plotting
     JHistCounts = NaN(length(setsToPlot), nBins);
     RHistCounts = NaN(length(setsToPlot), nBins);
@@ -509,7 +581,7 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     avgCURBD_set = cell(1, numel(setsToPlot));
     
     count2 = 0;
-    for iSet = min(allSetIDs) : max(allSetIDs) % setsToPlot 
+    for iSet = setsToPlot % min(allSetIDs) : max(allSetIDs) % setsToPlot 
         
         trlIDs = find(setID == iSet);
         fittedJ_samples = NaN([fittedConsJDim, numel(trlIDs)]);
@@ -564,7 +636,7 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
             count2 = count2 + 1;
             
             % CURBD that bitch
-            [CURBD, avgCURBD, ~, ~] = costaCURBD(J_set, R_set_trunc, inds_set_trunc, curbdRgns, minTrlsPerSet);
+            [CURBD, CURBD_exc, CURBD_inh, avgCURBD, avgCURBD_exc, avgCURBD_inh, ~, ~] = costaCURBD(J_set, R_set_trunc, inds_set_trunc, curbdRgns, minTrlsPerSet);
             avgCURBD_set(count2) = {avgCURBD}; % collect into cell for later plotting of CURBD
             
             % get trial averaged truncated activity from minTrlsPerSet for
@@ -668,6 +740,11 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
    
     %% check full, intra, inter
    
+    JOverTrlsFigDir = [RNNfigdir, 'J_over_trls', filesep]; % pVarOverTrls, first trl convergence, last trl convergence
+    if ~isfolder(JOverTrlsFigDir)
+        mkdir(JOverTrlsFigDir)
+    end
+    
     trlsPerFig = 500;
     
     for f = 1 : ceil(nTrls / trlsPerFig) % new plot every five hundred trials
@@ -690,16 +767,21 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
         line(gca, get(gca, 'xlim'), [0 0], 'linestyle', '-.', 'linewidth', 1, 'color', [0.2 0.2 0.2])
         title(gca, [monkey, ssnDate, ': mean consecutive J over trls'], 'fontsize', 14, 'fontweight', 'bold')
         
-        print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_mean_J_over_trls_', num2str(f)])
+        print('-dtiff', '-r400', [JOverTrlsFigDir, monkey, ssnDate, '_mean_J_over_trls_', num2str(f)])
         close
     end
     
     %% pVar / chi2 for first and last J
 
+    convergenceFigDir = [RNNfigdir, 'convergence', filesep]; % pVarOverTrls, first trl convergence, last trl convergence
+    if ~isfolder(convergenceFigDir)
+        mkdir(convergenceFigDir)
+    end
+    
     figure, set(gcf, 'units', 'normalized', 'outerposition', [0.1 0.15 0.8 0.7]),
     plot(pVarsTrls(trlSort), 'linewidth', 1.5, 'color', [0.05 0.4 0.15]), set(gca, 'ylim', [0.1 1], 'xlim', [1 nTrls]),
     title(gca, [monkey, ssnDate, ': pVar over trials'], 'fontsize', 14, 'fontweight', 'bold')
-    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_pVar_over_trls'])
+    print('-dtiff', '-r400', [convergenceFigDir, monkey, ssnDate, '_pVar_over_trls'])
     close
     
     idx = 15; % randi(size(intraRgnJ, 1));
@@ -739,7 +821,7 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     ylabel('chi2');  xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(firstChi2(end), '%.3f')])
     set(gca,'Box','off','TickDir','out','FontSize',14);
     % saveas(gcf, [RNNfigdir, 'convergence', filesep, monkey, ssnDate, '_firstTrlConvergence'], 'svg')
-    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_first_trl_convergence'])
+    print('-dtiff', '-r400', [convergenceFigDir, monkey, ssnDate, '_first_trl_convergence'])
     close
     
     % last
@@ -778,7 +860,7 @@ for iFile = 6 : length(allFiles) % 1 : length(allFiles) % for each session....
     plot(lastChi2(1:nRun), 'k', 'linewidth', 1.5)
     ylabel('chi2'); xlabel('run #'); set(gca, 'ylim', [-0.1 1]); title(['final chi2=', num2str(lastChi2(end), '%.3f')])
     set(gca,'Box','off','TickDir','out','FontSize',14);
-    print('-dtiff', '-r400', [RNNfigdir, monkey, ssnDate, '_last_trl_convergence'])
+    print('-dtiff', '-r400', [convergenceFigDir, monkey, ssnDate, '_last_trl_convergence'])
     close
 end
    
