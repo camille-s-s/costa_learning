@@ -2,15 +2,15 @@ function plotCostaRNNProgress(f, nUnits, targets, R, tRNN, tData, nRun, pVars, c
 
 set(0, 'currentfigure', f);
 nSP_Data = size(targets, 2);
-
+clf(f);
 idx = randi(nUnits);
 gridPos = {1, 2, [3 4 7 8], 5, 6};
 
 if trainRNN
-    axsTitles = {'targets', 'model', ['training run ', num2str(nRun)], ['current training pVar=', num2str(pVars(nRun), '%.3f')], ['current training chi2=', num2str(chi2(nRun), '%.3f')]};
+    axsTitles = {'targets', 'model', ['training run ', num2str(nRun)], ['current training pVar = ', num2str(pVars(nRun), '%.3f')], ['current training chi2 = ', num2str(chi2(nRun), '%.3f')]};
     axsXLbls = {'time (s)', 'mdl timestep', 'time (s)', 'run #', 'run #'};
 else
-    axsTitles = {'targets', 'model', ['testing run ', num2str(nRun)], ['final test pVar=', num2str(pVars(nRun), '%.3f')], ['final test chi2=', num2str(chi2(nSP_Data), '%.3f')]};
+    axsTitles = {'targets', 'model', ['testing run ', num2str(nRun)], ['final test pVar = ', num2str(pVars(nRun), '%.3f')], ['final test chi2 = ', num2str(chi2(nSP_Data), '%.3f')]};
     axsXLbls = {'time (s)', 'mdl timestep', 'time (s)', 'run #', 'timestep'};
 end
     axsYLbls = {'units', 'units', 'activity', 'pVar', 'chi2'};
@@ -40,10 +40,10 @@ legend(axs(3), 'model', 'target', 'location', 'northeast')
 
 if trainRNN % chi2 over training runs
     plot(axs(4), pVars(1 : nRun)) % only get a curve for training runs since nRunTrain > 1
-    plot(axs(5), chi2(1 : nRun));
+    plot(axs(5), chi2(1 : nRun), 'k', 'linewidth', 1.5);
     set(axs(5), 'ylim', [-0.1 1]);
 else % chi2 over each timestep of one test run through a trial
-    plot(axs(5), chi2(1 : nSP_Data));
+    plot(axs(5), chi2(1 : nSP_Data), 'k', 'linewidth', 1.5);
     set(axs(5), 'xlim', [1 nSP_Data]);
 end
 
