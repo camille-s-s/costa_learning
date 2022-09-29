@@ -7,11 +7,13 @@ nTrlsTrain = round(0.75 * nTrlsIncluded);
 nTrlsTest = nTrlsIncluded - nTrlsTrain;
 
 if ~isfile([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat']) % initialize list if starting at beginning
-    subset_trl_IDs = randperm(nTrls, nTrlsIncluded);
+    % subset_trl_IDs = randperm(nTrls, nTrlsIncluded);
+    subset_trl_IDs = randperm(nTrlsIncluded, nTrlsIncluded) + 30; % TEMPORARY, FOR DURING TESTING!!!
     train_trl_IDs = subset_trl_IDs(1 : nTrlsTrain); % isequal(all_trl_IDs(ismember(all_trl_IDs, train_trl_IDs)), train_trl_IDs)
     test_trl_IDs = subset_trl_IDs(nTrlsTrain + 1 : end); % all_trl_IDs(~ismember(all_trl_IDs, sort(train_trl_IDs)));
     save([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat'], 'train_trl_IDs', 'test_trl_IDs')
     start_trl_num = 1;
+    trainRNN = true;
 else
     load([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat'], 'train_trl_IDs', 'test_trl_IDs')
     prevMdls = dir([rnnSubDir, RNNname, '_train_trl*_num*.mat']);
@@ -26,6 +28,7 @@ else
     % if done training, move on to testing
     if isempty(last_completed_trl_num) % start_trl_num will also be empty
         last_completed_trl_num = nTrlsTrain;
+        start_trl_num = last_completed_trl_num + 1;
         trainRNN = false;
     else
         trainRNN = true;
