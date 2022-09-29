@@ -233,7 +233,7 @@ if trainRNN == true
             
             % plot
             if plotStatus
-                plotCostaRNNProgress(f, nUnits, targets, R, tRNN, tData, nRun, pVars, chi2, trainRNN)
+                plot_costa_RNN_progress(f, nUnits, targets, R, tRNN, tData, nRun, pVars, chi2, trainRNN)
             end
         end
         
@@ -412,7 +412,7 @@ else
             
             % plot
             if plotStatus
-                plotCostaRNNProgress(f, nUnits, targets, R_test, tRNN, tData, nRun, pVars_test, chi2_test, trainRNN)
+                plot_costa_RNN_progress(f, nUnits, targets, R_test, tRNN, tData, nRun, pVars_test, chi2_test, trainRNN)
             end
             
         end
