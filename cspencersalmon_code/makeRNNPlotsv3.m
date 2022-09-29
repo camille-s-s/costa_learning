@@ -519,7 +519,7 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
     inds_allsets_trunc = [1; cumsum(repmat(shortestTrl, length(allTrlIDs), 1)) + 1]';
     [CURBD_allsets, CURBD_allsets_exc, CURBD_allsets_inh, ...
         avgCURBD_allsets, avgCURBD_allsets_exc, avgCURBD_allsets_inh, ...
-        curbdRgns, nRegionsCURBD] = costaCURBD(J_allsets, R_allsets_trunc, inds_allsets_trunc, curbdRgns, minTrlsPerSet * length(setsToPlot));
+        curbdRgns, nRegionsCURBD] = compute_costa_CURBD(J_allsets, R_allsets_trunc, inds_allsets_trunc, curbdRgns, minTrlsPerSet * length(setsToPlot));
     avgCURBD_resh = reshape(avgCURBD_allsets, nRegionsCURBD .^ 2, 1); % for getting YLims
     avgCURBD_mean = cell2mat(arrayfun(@(i) mean(avgCURBD_resh{i}, 1), 1 : nRegionsCURBD^2, 'un', 0)');
     CURBDYLims = 0.05; % max(abs(avgCURBD_mean(:))); % max(abs(prctile(avgCURBD_mean(:), [0.5 99.5])));
@@ -699,7 +699,7 @@ for iFile = 1 : 3 %  : 3 %4 : 6 % 6 : length(allFiles) % 1 : length(allFiles) % 
             count2 = count2 + 1;
             
             % CURBD that bitch
-            [CURBD, CURBD_exc, CURBD_inh, avgCURBD, avgCURBD_exc, avgCURBD_inh, ~, ~] = costaCURBD(J_set, R_set_trunc, inds_set_trunc, curbdRgns, minTrlsPerSet);
+            [CURBD, CURBD_exc, CURBD_inh, avgCURBD, avgCURBD_exc, avgCURBD_inh, ~, ~] = compute_costa_CURBD(J_set, R_set_trunc, inds_set_trunc, curbdRgns, minTrlsPerSet);
             avgCURBD_set(count2) = {avgCURBD}; % collect into cell for later plotting of CURBD
             
             % get trial averaged truncated activity from minTrlsPerSet for
