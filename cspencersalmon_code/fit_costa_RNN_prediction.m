@@ -41,7 +41,7 @@ trainRNN        = true;                 % true by default until it's not!
 plotStatus      = true;
 saveMdl         = true;
 % nSamples        = 21;                   % #samples to save from consecutive fitted Js
-minLen          = NaN;                  % minimum trial length (ensures equivalent elapsed time across subsampled consecutive fitted Js)
+% minLen          = NaN;                  % minimum trial length (ensures equivalent elapsed time across subsampled consecutive fitted Js)
 
 %% RNN
 
@@ -92,16 +92,16 @@ end
 clearvars allEvents prevMdls allSpikes T
 
 % define minimimum trial length so all sampled Js are in same timescale
-if isnan(minLen)
-    minLen = min(diff(fixOnInds)); % shortest trial (from fixation to next fixation)
-end
+% if isnan(minLen)
+%     minLen = min(diff(fixOnInds)); % shortest trial (from fixation to next fixation)
+% end
 
 nUnits = size(exp_data, 1);
 
 %% generate train trial ID list (if trained via multiple fcn calls)
 
 % define train/test split
-nTrlsIncluded = 100;
+nTrlsIncluded = 12;
 [train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN] ...
     = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrls, nTrlsIncluded);
 
@@ -150,7 +150,8 @@ if trainRNN % TRAIN
         
         % initialize midputs
         R = zeros(nUnits, nsp_RNN); % rate matrix - firing rates of neurons
-        chi2 = zeros(1, nRunTrain);
+        cumulative_MSE_over_runs = NaN(1, nRunTrain);
+        mean_MSE_over_runs = NaN(1, nRunTrain);
         pVars = zeros(1, nRunTrain);
         JR = zeros(nUnits, nsp_RNN); % z(t) for the output readout unit
         
@@ -158,45 +159,39 @@ if trainRNN % TRAIN
         PJ = alpha * eye(nUnits); % dim are pN x pN where p=fraction of neurons to modify - here it's all of them
         
         if plotStatus
-            f = figure('color', 'w', 'Position', [100 100 1800 600]);
+            f = figure('color', 'w', 'Position', [100 100 1900 750]);
         end
         
         %% loop through training runs
         
         for nRun = 1 : nRunTrain
-            
             H = inputs(:, 1); % set initial condition to match target data
-            % R(:, 1) = nonlinearity(H); % convert to currents through nonlinearity
             R(:, 1) = tanh(H); % convert to currents through nonlinearity
             
             tLearn = 0; % keeps track of current time
             iLearn = 1; % keeps track of last data point learned
             
-            for t = 2 : nsp_RNN % why start from 2?
-                
+            MSE_over_steps = zeros(1, nsp_Data);
+            
+            for t = 2 : nsp_RNN
                 tLearn = tLearn + dtRNN; % index in actual RNN time
-                % R(:, t) = nonlinearity(H); % compute next RNN step
-                R(:, t) = tanh(H); % compute next RNN step
-                JR(:, t) = J * R(:, t) + inputs(:, iLearn); % 2022-09-27 CURRENTLY TESTING INCORPORATING INPUT!
-                H = H + dtRNN * (-H + JR(:, t)) / tauRNN; % p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
+                R(:, t) = tanh(H); % generate output / compute next RNN step
+                JR(:, t) = J * R(:, t) + inputs(:, iLearn); % this is the update term
+                H = H + dtRNN * (-H + JR(:, t)) / tauRNN; % "hidden" activity updated w the update term, p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
                 
                 % update J if the RNN time coincides with a data point
                 if tLearn >= dtData
-                    
                     tLearn = 0;
-                    % error = JR(1 : nUnits, t) - targets(1 : nUnits, iLearn); % 2022-09-27 CURRENTLY TESTING!
-                    error = JR(:, t) - targets(:, iLearn); % IDENTICAL TO ABOVE BUT FASTER
-                    chi2(nRun) = chi2(nRun) + mean(error.^2); % update chi2 using this error
+                    error = JR(:, t) - targets(:, iLearn);
+                    MSE_over_steps(iLearn) = mean(error .^ 2);
                     iLearn = iLearn + 1; % update learning index
                     
                     if (nRun <= nRunTrain)
-                        
                         k = PJ * R(:, t); % N x 1 (update term: sq mdl activity)
                         rPr = R(:, t)' * k; % scalar; inv xcorr of ntwk firing rates use xcorr bc when you square something it magnifies the sensitivity to changes
                         c = 1 / (1 + rPr); % tune learning rate by looking at magnitude of model activity. if big changes in FRs and wanna move quickly/take big steps (aka momentum). as get closer, don't wanna overshoot, so take smaller steps
                         PJ = PJ - c * (k * k'); % use squared firing rates (R * R^T) to update PJ - maybe momentum effect?
-                        % J(1 : nUnits, :) = J(1 : nUnits, :) - c * error(1 : nUnits, :) * k'; % update J (pre-syn wts adjusted according to post-syn target)
-                        J = J - c * error * k'; % identical to above but faster in current iteration
+                        J = J - c * error * k'; % update J (pre-syn wts adjusted according to post-syn target)
                     end
                 end
             end
@@ -204,9 +199,11 @@ if trainRNN % TRAIN
             rModelSample = R(:, iModelSample);
             pVar = 1 - ( norm(targets - rModelSample, 'fro' ) / ( sqrt(nUnits * (nsp_Data - 1)) * stdData(trl_num)) ).^2;
             pVars(nRun) = pVar;
+            mean_MSE_over_runs(nRun) = mean(MSE_over_steps);
+            cumulative_MSE_over_runs(nRun) = sum(MSE_over_steps);
             
             if plotStatus
-                plot_costa_RNN_progress(f, nUnits, targets, R, tRNN, tData, nRun, pVars, chi2, trainRNN)
+                plot_costa_RNN_progress(f, nUnits, targets, R(:, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, cumulative_MSE_over_runs, trainRNN, '')
             end
         end
         
@@ -214,7 +211,7 @@ if trainRNN % TRAIN
         RNN = make_RNN_struct(trainRNN, doSmooth, smoothWidth, meanSubtract, doSoftNorm, normByRegion, rmvOutliers, ...
             outliers, rnnDir, RNNname, dtFactor, g, alpha, tauRNN, [], [], [], nRunTrain, nonlinearity, ...
             nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, rModelSample, [], [], [], ...
-            dtRNN, dtData, J, J0, [], [], chi2, pVars, stdData);
+            dtRNN, dtData, J, J0, [], [], cumulative_MSE_over_runs, mean_MSE_over_runs, pVars, stdData);
         
         if saveMdl
             save([rnnSubDir, RNNname, '_train_trl', num2str(iTrlID), '_num', num2str(trl_num) '.mat'], 'RNN', '-v7.3')
@@ -233,13 +230,19 @@ else % TEST
         '_train_trl', num2str(train_trl_IDs(iTrl)), ...
         '_num', num2str(iTrl) '.mat']).name]), 'RNN', 'mdl', 'pVars'), 1 : nTrlsTrain, 'un', 0)');
     all_final_pVars = all_pVars(:, end);
-    mean_pVar_train = mean(all_final_pVars);
+    avg_final_pVar_train = mean(all_final_pVars);
     
-    all_chi2 = cell2mat(arrayfun(@(iTrl) getfield(load([rnnSubDir, dir([rnnSubDir, RNNname, ...
+    all_mean_MSE_over_runs = cell2mat(arrayfun(@(iTrl) getfield(load([rnnSubDir, dir([rnnSubDir, RNNname, ...
         '_train_trl', num2str(train_trl_IDs(iTrl)), ...
-        '_num', num2str(iTrl) '.mat']).name]), 'RNN', 'mdl', 'chi2'), 1 : nTrlsTrain, 'un', 0)');
-    all_final_chi2 = all_chi2(:, end);
-    mean_chi2_train = mean(all_final_chi2);
+        '_num', num2str(iTrl) '.mat']).name]), 'RNN', 'mdl', 'mean_MSE_over_runs'), 1 : nTrlsTrain, 'un', 0)');
+    all_final_mean_MSE = all_mean_MSE_over_runs(:, end);
+    avg_final_mean_MSE_train = mean(all_final_mean_MSE);
+    
+    all_cum_MSE_over_runs = cell2mat(arrayfun(@(iTrl) getfield(load([rnnSubDir, dir([rnnSubDir, RNNname, ...
+        '_train_trl', num2str(train_trl_IDs(iTrl)), ...
+        '_num', num2str(iTrl) '.mat']).name]), 'RNN', 'mdl', 'cumulative_MSE_over_runs'), 1 : nTrlsTrain, 'un', 0)');
+    all_final_cum_MSE = all_cum_MSE_over_runs(:, end);
+    avg_final_sum_MSE_train = mean(all_final_cum_MSE);
     
     stdData_test = zeros(1, length(test_trl_IDs));
     
@@ -255,7 +258,8 @@ else % TEST
     end
     
     pVars_test = zeros(nTrlsTest, nRunTest);
-    final_chi2_test = zeros(nTrlsTest, nRunTest);
+    sum_MSE_over_runs_test = zeros(nTrlsTest, nRunTest);
+    mean_MSE_over_runs_test = zeros(nTrlsTest, nRunTest);
     
     for iTrlID = test_trl_IDs(start_trl_num : end)
         
@@ -267,80 +271,71 @@ else % TEST
         iStop = fixOnInds(iTrlID + 1) - 1; % right before start of next trial
         inputs = exp_data(:, iStart : iStop - 1);
         targets = exp_data(:, iStart + 1 : iStop);
-        tData = allPossTS(iStart : iStop); nsp_Data = length(tData); % timeVec for current data
-        tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN); % timevec for RNN
+        tData = allPossTS(iStart : iStop); nsp_Data = length(tData);
+        tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN);
         
         % get standard deviation of entire data that we are looking at
         stdData_test(trl_num)  = std(reshape(inputs, nUnits * (nsp_Data - 1), 1));
         
         % get indices for each sample of model data for getting pVar
-        iModelSample = zeros(nsp_Data - 1, 1);
+        iModelSample_test = zeros(nsp_Data - 1, 1);
         
         for i = 1 : nsp_Data - 1
-            [~, iModelSample(i)] = min(abs(tData(i) - tRNN));
+            [~, iModelSample_test(i)] = min(abs(tData(i) - tRNN));
         end
         
         % initialize midputs
-        R_test = zeros(nUnits, nsp_RNN); % rate matrix - firing rates of neurons
-        chi2_test = zeros(1, nsp_Data);
-        JR_test = zeros(nUnits, nsp_RNN); % z(t) for the output readout unit
+        R_test = zeros(nUnits, nsp_RNN);
+
+
+        JR_test = zeros(nUnits, nsp_RNN);
         
         if plotStatus
-            f = figure('color', 'w', 'Position', [100 100 1900 700]);
+            f = figure('color', 'w', 'Position', [100 100 1900 750]);
         end
         
         %% loop through testing runs
         
         for nRun = 1 : nRunTest
+            H = inputs(:, 1); % !!! can be initialized with some random gaussian? nUnits x 1 random sample
+            R_test(:, 1) = tanh(H);
             
-            H = inputs(:, 1); % seed with start of test data set
-            R_test(:, 1) = tanh(H); % convert to currents through nonlinearity
+            tLearn = 0;
+            iLearn = 1;
             
-            tLearn = 0; % keeps track of current time
-            iLearn = 1; % keeps track of last data point learned
+            MSE_over_steps_test = zeros(1, nsp_Data);
             
             for t = 2 : nsp_RNN
-                
-                tLearn = tLearn + dtRNN; % index in actual RNN time
-                R_test(:, t) = tanh(H); % compute next RNN step
-                JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % 2022-09-27 CURRENTLY TESTING INCORPORATING INPUT!
-                H = H + dtRNN * (-H + JR_test(:, t)) / tauRNN; % p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
+                tLearn = tLearn + dtRNN;
+                R_test(:, t) = tanh(H); % generate output
+                JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % update term
+                H = H + dtRNN * (-H + JR_test(:, t)) / tauRNN; % "hidden" activity updated with the update term
                 
                 if tLearn >= dtData
                     tLearn = 0;
-                    
-                    error = JR_test(:, t) - targets(:, iLearn); % 2022-09-27 CURRENTLY TESTING!
-                    chi2_test(iLearn) = mean(error .^ 2);
-                    
-%                     if iLearn == 1
-%                         chi2_test(1, iLearn) = mean(error .^ 2);
-%                     elseif iLearn > 1
-%                         chi2_test(1, iLearn) = chi2_test(1, iLearn - 1) + mean(error .^ 2); % update chi2 using this error
-%                     end
-                    
-                    iLearn = iLearn + 1; % update learning index
+                    error = JR_test(:, t) - targets(:, iLearn);
+                    MSE_over_steps_test(iLearn) = mean(error .^ 2);
+                    iLearn = iLearn + 1;
                 end
             end
-            
-            rModelSample_test = R_test(:, iModelSample);
+           
+            rModelSample_test = R_test(:, iModelSample_test);
             pVar = 1 - ( norm(targets - rModelSample_test, 'fro' ) / ( sqrt(nUnits * (nsp_Data-1)) * stdData_test(trl_num)) ).^2;
             pVars_test(trl_num, nRun) = pVar;
+            mean_MSE_over_runs_test(trl_num, nRun) = mean(MSE_over_steps_test);
+            sum_MSE_over_runs_test(trl_num, nRun) = sum(MSE_over_steps_test);
             
-            cumulative_chi2_test = cumsum(chi2_test);
-                    
-            if plotStatus
-                plot_costa_RNN_progress(f, nUnits, targets, R_test, tRNN, tData, nRun, pVars_test, cumulative_chi2_test, trainRNN)
+            if plotStatus % main difference is for testing you only have 1 run so we show MSE over steps in that run
+                fTitle = ['[', RNNname, ']: test trial ID ', num2str(iTrlID), ' (#', num2str(trl_num), ')'];
+                plot_costa_RNN_progress(f, nUnits, targets, R_test(:, iModelSample_test), tRNN(:, iModelSample_test), tData, nRun, pVars_test(trl_num, nRun), MSE_over_steps_test, trainRNN, fTitle)
             end
         end
-        
-        % last cumulative chi2 of a given trial      
-        final_chi2_test(trl_num) = cumulative_chi2_test(end); % chi2_test(nsp_Data - 1);
         
         % package up and save outputs
         RNN = make_RNN_struct(trainRNN, doSmooth, smoothWidth, meanSubtract, doSoftNorm, normByRegion, rmvOutliers, ...
             outliers, rnnDir, RNNname, dtFactor, g, alpha, tauRNN, [], [], [], nRunTrain, nonlinearity, ...
             nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, rModelSample_test, [], [], [], ...
-            dtRNN, dtData, J_test, [], [], [], cumulative_chi2_test, pVars_test, stdData_test);
+            dtRNN, dtData, J_test, [], [], [], sum_MSE_over_runs_test, mean_MSE_over_runs_test, pVars_test, stdData_test);
         
         if saveMdl
             save([rnnSubDir, RNNname, '_test_trl', num2str(iTrlID), '_num', num2str(trl_num) '.mat'], 'RNN', '-v7.3')
@@ -353,8 +348,10 @@ else % TEST
     end
     
     % get convergence metrics so you can compare train/test
-    mean_final_pVar_test = mean(pVars_test);
-    mean_final_chi2_test = mean(final_chi2_test);
+    avg_final_pVar_test = mean(pVars_test(:, end));
+    avg_final_mean_MSE_test = mean(mean_MSE_over_runs_test);
+    avg_final_sum_MSE_test = mean(sum_MSE_over_runs_test);
+    
 end
 
 end
