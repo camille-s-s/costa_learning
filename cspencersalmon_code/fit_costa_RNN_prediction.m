@@ -101,7 +101,7 @@ nUnits = size(exp_data, 1);
 %% generate train trial ID list (if trained via multiple fcn calls)
 
 % define train/test split
-nTrlsIncluded = 12;
+nTrlsIncluded = 100;
 [train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN] ...
     = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrls, nTrlsIncluded);
 
@@ -170,8 +170,8 @@ if trainRNN % TRAIN
             
             tLearn = 0; % keeps track of current time
             iLearn = 1; % keeps track of last data point learned
-            
-            MSE_over_steps = zeros(1, nsp_Data);
+           
+            MSE_over_steps = zeros(1, nsp_Data - 1);
             
             for t = 2 : nsp_RNN
                 tLearn = tLearn + dtRNN; % index in actual RNN time
@@ -182,7 +182,7 @@ if trainRNN % TRAIN
                 % update J if the RNN time coincides with a data point
                 if tLearn >= dtData
                     tLearn = 0;
-                    error = JR(:, t) - targets(:, iLearn);
+                    error = R(:, t) - targets(:, iLearn);
                     MSE_over_steps(iLearn) = mean(error .^ 2);
                     iLearn = iLearn + 1; % update learning index
                     
@@ -244,7 +244,7 @@ else % TEST
     all_final_cum_MSE = all_cum_MSE_over_runs(:, end);
     avg_final_sum_MSE_train = mean(all_final_cum_MSE);
     
-    stdData_test = zeros(1, length(test_trl_IDs));
+    stdData_test = zeros(1, nTrlsTest);
     
     start_trl_num = 1;
     trl_num = start_trl_num;
@@ -286,8 +286,6 @@ else % TEST
         
         % initialize midputs
         R_test = zeros(nUnits, nsp_RNN);
-
-
         JR_test = zeros(nUnits, nsp_RNN);
         
         if plotStatus
@@ -295,32 +293,44 @@ else % TEST
         end
         
         %% loop through testing runs
-        
         for nRun = 1 : nRunTest
             H = inputs(:, 1); % !!! can be initialized with some random gaussian? nUnits x 1 random sample
             R_test(:, 1) = tanh(H);
             
             tLearn = 0;
             iLearn = 1;
+            % iLearnAll = NaN(1, nsp_RNN);
+            % iLearnAll(1) = iLearn;
             
-            MSE_over_steps_test = zeros(1, nsp_Data);
+            MSE_over_steps_test = zeros(1, nsp_Data - 1);
             
             for t = 2 : nsp_RNN
+                % iLearnAll(t) = iLearn;
                 tLearn = tLearn + dtRNN;
                 R_test(:, t) = tanh(H); % generate output
-                JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % update term
+                % JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % update term with current input
+                % JR_test(:, t) = J_test * R_test(:, t) + R_test(:, iModelSample_test(iLearn)); % update term with current output (at RNN timepoints coinciding with datapoints)
+                try
+                    JR_test(:, t) = J_test * (R_test(:, t) + R_test(:, iModelSample_test(iLearn - 1))); % update term with previous output (at RNN timepoints coinciding with datapoints)
+                catch
+                    JR_test(:, t) = J_test * R_test(:, t); % add nothing!
+                    % JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % seed with inputs (iLearn=1 at t=2)
+                end
+                % JR_test(:, t) = J_test * R_test(:, t) + R_test(:, t); % update term with current output 
+                % JR_test(:, t) = J_test * R_test(:, t) + R_test(:, t - 1); % update term with previous output 
+
                 H = H + dtRNN * (-H + JR_test(:, t)) / tauRNN; % "hidden" activity updated with the update term
                 
                 if tLearn >= dtData
                     tLearn = 0;
-                    error = JR_test(:, t) - targets(:, iLearn);
+                    error = R_test(:, t) - targets(:, iLearn);
                     MSE_over_steps_test(iLearn) = mean(error .^ 2);
                     iLearn = iLearn + 1;
                 end
             end
            
             rModelSample_test = R_test(:, iModelSample_test);
-            pVar = 1 - ( norm(targets - rModelSample_test, 'fro' ) / ( sqrt(nUnits * (nsp_Data-1)) * stdData_test(trl_num)) ).^2;
+            pVar = 1 - ( norm(targets - rModelSample_test, 'fro' ) / ( sqrt(nUnits * (nsp_Data-1)) * stdData_test(trl_num)) ) .^ 2;
             pVars_test(trl_num, nRun) = pVar;
             mean_MSE_over_runs_test(trl_num, nRun) = mean(MSE_over_steps_test);
             sum_MSE_over_runs_test(trl_num, nRun) = sum(MSE_over_steps_test);
