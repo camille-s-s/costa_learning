@@ -91,11 +91,6 @@ end
 
 clearvars allEvents prevMdls allSpikes T
 
-% define minimimum trial length so all sampled Js are in same timescale
-% if isnan(minLen)
-%     minLen = min(diff(fixOnInds)); % shortest trial (from fixation to next fixation)
-% end
-
 nUnits = size(exp_data, 1);
 
 %% generate train trial ID list (if trained via multiple fcn calls)
@@ -163,20 +158,26 @@ if trainRNN % TRAIN
         end
         
         %% loop through training runs
-        
         for nRun = 1 : nRunTrain
             H = inputs(:, 1); % set initial condition to match target data
             R(:, 1) = tanh(H); % convert to currents through nonlinearity
-            
+
             tLearn = 0; % keeps track of current time
             iLearn = 1; % keeps track of last data point learned
-           
             MSE_over_steps = zeros(1, nsp_Data - 1);
-            
+%             all_mean_R = []; all_mean_J = []; all_rPr = []; all_c = [];
             for t = 2 : nsp_RNN
                 tLearn = tLearn + dtRNN; % index in actual RNN time
                 R(:, t) = tanh(H); % generate output / compute next RNN step
-                JR(:, t) = J * R(:, t) + inputs(:, iLearn); % this is the update term
+                %JR(:, t) = J * R(:, t) + inputs(:, iLearn); % this is the update term / 2022-10-17 THIS WORKED, BUT WE
+                %ARE TRYING NEW STUFF
+                
+                if iLearn > 1
+                    JR(:, t) = J * R(:, t) + R(:, iModelSample(iLearn - 1));
+                else
+                    JR(:, t) = J * R(:, t) + inputs(:, iLearn);
+                end
+                
                 H = H + dtRNN * (-H + JR(:, t)) / tauRNN; % "hidden" activity updated w the update term, p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
                 
                 % update J if the RNN time coincides with a data point
@@ -191,7 +192,12 @@ if trainRNN % TRAIN
                         rPr = R(:, t)' * k; % scalar; inv xcorr of ntwk firing rates use xcorr bc when you square something it magnifies the sensitivity to changes
                         c = 1 / (1 + rPr); % tune learning rate by looking at magnitude of model activity. if big changes in FRs and wanna move quickly/take big steps (aka momentum). as get closer, don't wanna overshoot, so take smaller steps
                         PJ = PJ - c * (k * k'); % use squared firing rates (R * R^T) to update PJ - maybe momentum effect?
-                        J = J - c * error * k'; % update J (pre-syn wts adjusted according to post-syn target)
+                        J = J - c * error * k'; % update J (pre-syn wts adjusted according to post-syn target)   
+                        
+%                         all_mean_R = [all_mean_R, mean(R(:, t))];
+%                         all_mean_J = [all_mean_J, mean(J(:))];
+%                         all_rPr = [all_rPr, rPr];
+%                         all_c = [all_c, c];
                     end
                 end
             end
@@ -298,27 +304,18 @@ else % TEST
             R_test(:, 1) = tanh(H);
             
             tLearn = 0;
-            iLearn = 1;
-            % iLearnAll = NaN(1, nsp_RNN);
-            % iLearnAll(1) = iLearn;
-            
+            iLearn = 1;       
             MSE_over_steps_test = zeros(1, nsp_Data - 1);
             
             for t = 2 : nsp_RNN
-                % iLearnAll(t) = iLearn;
                 tLearn = tLearn + dtRNN;
                 R_test(:, t) = tanh(H); % generate output
-                % JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % update term with current input
-                % JR_test(:, t) = J_test * R_test(:, t) + R_test(:, iModelSample_test(iLearn)); % update term with current output (at RNN timepoints coinciding with datapoints)
-                try
+                if iLearn > 1
                     JR_test(:, t) = J_test * (R_test(:, t) + R_test(:, iModelSample_test(iLearn - 1))); % update term with previous output (at RNN timepoints coinciding with datapoints)
-                catch
+                else
                     JR_test(:, t) = J_test * R_test(:, t); % add nothing!
-                    % JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % seed with inputs (iLearn=1 at t=2)
                 end
-                % JR_test(:, t) = J_test * R_test(:, t) + R_test(:, t); % update term with current output 
-                % JR_test(:, t) = J_test * R_test(:, t) + R_test(:, t - 1); % update term with previous output 
-
+   
                 H = H + dtRNN * (-H + JR_test(:, t)) / tauRNN; % "hidden" activity updated with the update term
                 
                 if tLearn >= dtData
@@ -361,7 +358,6 @@ else % TEST
     avg_final_pVar_test = mean(pVars_test(:, end));
     avg_final_mean_MSE_test = mean(mean_MSE_over_runs_test);
     avg_final_sum_MSE_test = mean(sum_MSE_over_runs_test);
-    
 end
 
 end
