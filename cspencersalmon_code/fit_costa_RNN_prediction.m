@@ -35,13 +35,12 @@ nonlinearity    = @tanh;                % inline function for nonlinearity
 nRunTrain       = 1000;
 nRunTest        = 1;                    % TO DO: IDK HOW MUCH TO TEST?!?!
 trainFromPrev   = false;                % assume you're starting from beginning, but if not, feed in previous J
+trainAllUnits   = true;                 % modify all units in network by default
 trainRNN        = true;                 % true by default until it's not!
 
 %% output options
 plotStatus      = true;
 saveMdl         = true;
-% nSamples        = 21;                   % #samples to save from consecutive fitted Js
-% minLen          = NaN;                  % minimum trial length (ensures equivalent elapsed time across subsampled consecutive fitted Js)
 
 %% RNN
 
@@ -53,15 +52,15 @@ end
 % define output directories
 rnnDir          = ['~/Dropbox (BrAINY Crew)/costa_learning/models/', mouseVer, filesep];
 rnnSubDir       = [rnnDir, RNNname(strfind(RNNname, '_') + 1 : end), filesep];
-rnnFigDir       = ['~/Dropbox (BrAINY Crew)/costa_learning/figures/', mouseVer, filesep];
+% rnnFigDir       = ['~/Dropbox (BrAINY Crew)/costa_learning/figures/', mouseVer, filesep];
 
 if ~isfolder(rnnSubDir)
     mkdir(rnnSubDir)
 end
 
-if ~isfolder(rnnFigDir)
-    mkdir(rnnFigDir)
-end
+% if ~isfolder(rnnFigDir)
+%     mkdir(rnnFigDir)
+% end
 
 if ~isfolder([rnnDir, 'train_test_lists'])
     mkdir([rnnDir, 'train_test_lists'])
@@ -81,8 +80,7 @@ ampWN           = sqrt( tauWN / dtRNN );
 if ~isfile([rnnDir 'exp_data' filesep, RNNname, '_exp_data.mat'])
     
     [exp_data, outliers, arrayUnit, arrayRgns, fixOnInds, stimTimeInds, nTrls, nTrlsPerSet, nSets, setID] ...
-        = preprocess_data_for_RNN_training(allSpikes, allEvents, T, ...
-        doSmooth, rmvOutliers, meanSubtract, doSoftNorm, ...
+        = preprocess_data_for_RNN_training(allSpikes, allEvents, T, doSmooth, rmvOutliers, meanSubtract, doSoftNorm, ...
         smoothWidth, dtData, arrayUnit, arrayRgns);
     
     save([rnnDir 'exp_data' filesep, RNNname, '_exp_data.mat'],  'exp_data', 'outliers', 'fixOnInds', 'stimTimeInds', 'nTrls', 'nTrlsPerSet', 'nSets', 'setID', 'arrayUnit', 'arrayRgns', '-v7.3')
@@ -94,13 +92,29 @@ clearvars allEvents prevMdls allSpikes T
 
 nUnits = size(exp_data, 1);
 
+% TEMPORARY 11/03/2022 sidebar where weeee set all the network's model units to predict outputs for just one real unit! 
+% idx = randi(nUnits);
+% exp_data = repmat(exp_data(idx, :), nUnits, 1);
+
+
 %% generate train trial ID list (if trained via multiple fcn calls)
 
 % define train/test split
 nTrlsIncluded = 32;
-[train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN] ...
-    = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrls, nTrlsIncluded);
+[train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN, iTarget] = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrls, nTrlsIncluded);
 
+% define target units
+if isempty(iTarget)
+    if trainAllUnits
+        iTarget = 1 : nUnits;
+    else
+        iTarget = randperm(nUnits, 1); % select 1 unit as target?
+    end
+end
+
+nPlasticUnits = length(iTarget);
+
+     % TO DO: ADD CHECK FOR IF TRAIN AND TEST iTARGET ARE THE SAME!!!
 %%
 if trainRNN % TRAIN
     
@@ -131,20 +145,15 @@ if trainRNN % TRAIN
             end
         end
         
-        J0 = J;
+        J0 = J; % save initial J
+        stdData(trl_num)  = std(reshape(inputs(iTarget, :), nPlasticUnits * (nsp_Data - 1), 1)); % std of entire data that we are looking at
         
-        % get standard deviation of entire data that we are looking at
-        stdData(trl_num)  = std(reshape(inputs, nUnits * (nsp_Data - 1), 1));
-        
-        % get indices for each sample of model data for getting pVar
-        iModelSample = zeros(nsp_Data - 1, 1);
-        
+        iModelSample = zeros(nsp_Data - 1, 1); % get indices for each sample of model data
         for i = 1 : nsp_Data - 1
             [~, iModelSample(i)] = min(abs(tData(i) - tRNN));
         end
         
-        % set up white noise inputs (from CURBD)
-        [inputWN] = get_frozen_input_WN(nUnits, ampWN, tauWN, ampInWN, nsp_RNN, dtRNN);
+        % [inputWN] = get_frozen_input_WN(nUnits, ampWN, tauWN, ampInWN, nsp_RNN, dtRNN); % set up white noise inputs (from CURBD)
         
         % initialize midputs
         R = zeros(nUnits, nsp_RNN); % rate matrix - firing rates of neurons
@@ -161,7 +170,6 @@ if trainRNN % TRAIN
         end
         
         %% loop through training runs
-        
         % TEMPORARY 2022-10-25 FOR PLOTTING PROGRESS AS WE TWEAK PARAMETERS
         axNum = 0;
         f2 = figure('color', 'w', 'Position', [100 100 1900 500]);
@@ -182,12 +190,22 @@ if trainRNN % TRAIN
                 tLearn = tLearn + dtRNN; % index in actual RNN time
                 R(:, t) = tanh(H); % generate output / compute next RNN step
                 
-                if iLearn > 1
-                    JR(:, t) = J * R(:, t) + R(:, iModelSample(iLearn - 1));
-                else
-                    % JR(:, t) = J * R(:, t) + inputs(:, iLearn);
-                    JR(:, t) = J * R(:, t) + R(:, 1);
-                end
+                % % % % % % % % % % % UPDATE TERM SECTION % % % % % % % % % % % 
+                
+                % take 5
+                % if iLearn > 1
+                %     JR(:, t) = J * R(:, t) + R(:, iModelSample(iLearn - 1));
+                % else
+                %     JR(:, t) = J * R(:, t) + R(:, 1);
+                % end
+
+                % take 6
+                % JR(:, t) = J * R(:, t) + inputs(:, iLearn); % one-step prediction
+                
+                % take 7
+                JR(:, t) = J * R(:, t) + R(:, t - 1);
+                
+                % % % % % % % % % % % UPDATE TERM SECTION % % % % % % % % % % % 
                 
                 H = H + dtRNN * (-H + JR(:, t)) / tauRNN; % "hidden" activity updated w the update term, p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
                 
@@ -199,28 +217,28 @@ if trainRNN % TRAIN
                     iLearn = iLearn + 1; % update learning index
                     
                     if (nRun <= nRunTrain)
-                        k = PJ * R(:, t); % N x 1 (update term: sq mdl activity)
-                        rPr = R(:, t)' * k; % scalar; inv xcorr of ntwk firing rates use xcorr bc when you square something it magnifies the sensitivity to changes
+                        k = PJ * R(iTarget, t); % N x 1 (update term: sq mdl activity)
+                        rPr = R(iTarget, t)' * k; % scalar; inv xcorr of ntwk firing rates use xcorr bc when you square something it magnifies the sensitivity to changes
                         c = 1 / (1 + rPr); % tune learning rate by looking at magnitude of model activity. if big changes in FRs and wanna move quickly/take big steps (aka momentum). as get closer, don't wanna overshoot, so take smaller steps
                         PJ = PJ - c * (k * k'); % use squared firing rates (R * R^T) to update PJ - maybe momentum effect?
-                        J = J - c * error * k'; % update J (pre-syn wts adjusted according to post-syn target)   
+                        J(:, iTarget) = J(:, iTarget) - c * error * k'; % update J (pre-syn wts adjusted according to post-syn target)   
                     end
                 end
             end
             
-            rModelSample = R(:, iModelSample);
-            pVar = 1 - ( norm(targets - rModelSample, 'fro' ) / ( sqrt(nUnits * (nsp_Data - 1)) * stdData(trl_num)) ).^2;
+            rModelSample = R(iTarget, iModelSample);
+            pVar = 1 - ( norm(targets(iTarget, :) - rModelSample, 'fro' ) / ( sqrt(nPlasticUnits * (nsp_Data - 1)) * stdData(trl_num)) ).^2;
             pVars(nRun) = pVar;
             mean_MSE_over_runs(nRun) = mean(MSE_over_steps);
             sum_MSE_over_runs(nRun) = sum(MSE_over_steps);
             
             if plotStatus
-                plot_costa_RNN_progress(f, nUnits, targets, R(:, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, sum_MSE_over_runs, trainRNN, '')
+                plot_costa_RNN_progress(f, nUnits, targets(iTarget, :), R(iTarget, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, sum_MSE_over_runs, trainRNN, '')
             end
             
             if ismember(nRun, [1 250 nRunTrain])
                 axNum = axNum + 1;
-                plot_costa_RNN_param_comparisons(f2, axs, [RNNname(5 : end), ' (ID: ', num2str(iTrlID), ' / # ', num2str(trl_num), '):'], nUnits, targets, R(:, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, MSE_over_steps, axNum)
+                plot_costa_RNN_param_comparisons(f2, axs, [RNNname(5 : end), ' (ID: ', num2str(iTrlID), ' / # ', num2str(trl_num), '):'], nUnits, targets(iTarget, :), R(iTarget, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, MSE_over_steps, axNum)
             end
         end
         
@@ -232,7 +250,7 @@ if trainRNN % TRAIN
         [RNN] = make_RNN_struct(trainRNN, doSmooth, smoothWidth, meanSubtract, doSoftNorm, normByRegion, rmvOutliers, ...
             outliers, rnnDir, RNNname, dtFactor, g, alpha, tauRNN, tauWN, ampInWN, ampWN, nRunTrain, nonlinearity, ...
             nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, rModelSample, [], [], [], ...
-            dtRNN, dtData, J, J0, [], [], sum_MSE_over_runs, mean_MSE_over_runs, pVars, stdData);
+            dtRNN, dtData, J, J0, [], [], sum_MSE_over_runs, mean_MSE_over_runs, pVars, stdData, iTarget);
         
         if saveMdl
             save([rnnSubDir, RNNname, '_train_trl', num2str(iTrlID), '_num', num2str(trl_num) '.mat'], 'RNN', '-v7.3')
@@ -294,10 +312,8 @@ else % TEST
         tData = allPossTS(iStart : iStop); nsp_Data = length(tData);
         tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN);
         
-        % get standard deviation of entire data that we are looking at
-        stdData_test(trl_num)  = std(reshape(inputs, nUnits * (nsp_Data - 1), 1));
+        stdData_test(trl_num)  = std(reshape(inputs(iTarget, :), nPlasticUnits * (nsp_Data - 1), 1)); 
         
-        % get indices for each sample of model data for getting pVar
         iModelSample_test = zeros(nsp_Data - 1, 1);
         
         for i = 1 : nsp_Data - 1
@@ -333,13 +349,23 @@ else % TEST
                 tLearn = tLearn + dtRNN;
                 R_test(:, t) = tanh(H); % generate output
                 
-                if iLearn > 1
-                    JR_test(:, t) = J_test * R_test(:, t) + R_test(:, iModelSample_test(iLearn - 1)); % update term with previous output (at RNN timepoints coinciding with datapoints)
-                else
-                    % JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % add nothing!
-                    JR_test(:, t) = J_test * R_test(:, t) + R_test(:, 1); % add nothing!
-                end
-   
+                % % % % % % % % % % % UPDATE TERM SECTION % % % % % % % % % % % 
+                
+                % take 5
+                % if iLearn > 1
+                %     JR_test(:, t) = J_test * R_test(:, t) + R_test(:, iModelSample_test(iLearn - 1)); % update term with previous output (at RNN timepoints coinciding with datapoints)
+                % else
+                %     JR_test(:, t) = J_test * R_test(:, t) + R_test(:, 1); % add nothing!
+                % end
+
+                % take 6
+                % JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % one-step prediction
+                
+                % take 7
+                JR_test(:, t) = J_test * R_test(:, t) + R_test(:, t - 1);
+                
+                % % % % % % % % % % % UPDATE TERM SECTION % % % % % % % % % % % 
+                
                 H = H + dtRNN * (-H + JR_test(:, t)) / tauRNN;
                 
                 if tLearn >= dtData
@@ -350,15 +376,15 @@ else % TEST
                 end
             end
            
-            rModelSample_test = R_test(:, iModelSample_test);
-            pVar = 1 - ( norm(targets - rModelSample_test, 'fro' ) / ( sqrt(nUnits * (nsp_Data-1)) * stdData_test(trl_num)) ) .^ 2;
+            rModelSample_test = R_test(iTarget, iModelSample_test);
+            pVar = 1 - ( norm(targets(iTarget, :) - rModelSample_test, 'fro' ) / ( sqrt(nPlasticUnits * (nsp_Data-1)) * stdData_test(trl_num)) ) .^ 2;
             pVars_test(trl_num, nRun) = pVar;
             mean_MSE_over_runs_test(trl_num, nRun) = mean(MSE_over_steps_test);
             sum_MSE_over_runs_test(trl_num, nRun) = sum(MSE_over_steps_test);
             
             if plotStatus % main difference is for testing you only have 1 run so we show MSE over steps in that run
                 fTitle = ['[', RNNname, ']: test trial ID ', num2str(iTrlID), ' (#', num2str(trl_num), ')'];
-                plot_costa_RNN_progress(f, nUnits, targets, R_test(:, iModelSample_test), tRNN(:, iModelSample_test), tData, nRun, pVars_test(trl_num, nRun), MSE_over_steps_test, trainRNN, fTitle)
+                plot_costa_RNN_progress(f, nUnits, targets(iTarget, :), R_test(iTarget, iModelSample_test), tRNN(:, iModelSample_test), tData, nRun, pVars_test(trl_num, nRun), MSE_over_steps_test, trainRNN, fTitle)
             end
             
             if ismember(nRun, [1 250 nRunTrain])
@@ -375,7 +401,7 @@ else % TEST
         RNN = make_RNN_struct(trainRNN, doSmooth, smoothWidth, meanSubtract, doSoftNorm, normByRegion, rmvOutliers, ...
             outliers, rnnDir, RNNname, dtFactor, g, alpha, tauRNN, tauWN, ampInWN, ampWN, nRunTrain, nonlinearity, ...
             nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, rModelSample_test, [], [], [], ...
-            dtRNN, dtData, J_test, [], [], [], sum_MSE_over_runs_test, mean_MSE_over_runs_test, pVars_test, stdData_test);
+            dtRNN, dtData, J_test, [], [], [], sum_MSE_over_runs_test, mean_MSE_over_runs_test, pVars_test, stdData_test, iTarget);
         
         if saveMdl
             save([rnnSubDir, RNNname, '_test_trl', num2str(iTrlID), '_num', num2str(trl_num) '.mat'], 'RNN', '-v7.3')
