@@ -7,13 +7,13 @@ exp_data = allSpikes;
 
 % cleaning: smooth with gaussian
 if doSmooth
-    exp_data = smoothdata(exp_data, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from msec to #bins);
+    exp_data = smoothdata(exp_data, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from sec to #bins);
 end
 
 % cleaning: outlier removal
 if rmvOutliers
     
-    outliers = isoutlier(mean(exp_data, 2), 'percentiles', [1 99]);
+    outliers = isoutlier(mean(exp_data, 2), 'percentiles', [10 100]);
     exp_data = exp_data(~outliers, :);
     arrayUnit = arrayUnit(~outliers, :);
     
