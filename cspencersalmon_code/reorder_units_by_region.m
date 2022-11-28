@@ -32,7 +32,7 @@ rgns = rgns(rgnOrder, :);
 % make more legible
 rgns(:, 1) = arrayfun(@(iRgn) strrep(rgns{iRgn, 1}, 'left_', 'L'), 1 : nRegions, 'un', 0)';
 rgns(:, 1) = arrayfun(@(iRgn) strrep(rgns{iRgn, 1}, 'right_', 'R'), 1 : nRegions, 'un', 0)';
-rgns(:, 1) = arrayfun(@(iRgn) strrep(rgns{iRgn, 1}, 'PFC', ''), 1 : nRegions, 'un', 0)';
+rgns(:, 1) = arrayfun(@(iRgn) strrep(rgns{iRgn, 1}, 'LPFC', ''), 1 : nRegions, 'un', 0)';
 
 % rgnLabels = rgns(:, 1);
 % rgnIxToPlot = cell2mat(arrayfun(@(iRgn) contains(rgnLabels{iRgn}(1), 'L'), 1 : nRegions, 'un', 0));
