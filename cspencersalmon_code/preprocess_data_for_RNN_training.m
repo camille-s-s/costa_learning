@@ -7,7 +7,8 @@ exp_data = allSpikes;
 
 % cleaning: smooth with gaussian
 if doSmooth
-    exp_data = smoothdata(exp_data, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from sec to #bins);
+    % exp_data = smoothdata(exp_data, 2, 'gaussian', smoothWidth / dtData); % convert smoothing kernel from sec to #bins);
+    exp_data = smooth_data(exp_data', dtData, smoothWidth); exp_data = exp_data'; % try direct convolution custom not matlab toolbox
 end
 
 % cleaning: outlier removal
