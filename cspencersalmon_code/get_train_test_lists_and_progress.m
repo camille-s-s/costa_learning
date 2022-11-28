@@ -12,7 +12,7 @@ called_by = callingFunc.name;
 
  % initialize list if starting at beginning of a file
 if ~isfile([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat']) 
-    subset_trl_IDs = randperm(nTrlsIncluded, nTrlsIncluded) + 195; % 2022-10-26 temporary, for dev. will be randperm(nTrlsIncluded); or randperm(nTrls, nTrlsIncluded)
+    subset_trl_IDs = randperm(nTrlsIncluded, nTrlsIncluded) + 149; % 2022-10-26 temporary, for dev. will be randperm(nTrlsIncluded); or randperm(nTrls, nTrlsIncluded)
     train_trl_IDs = subset_trl_IDs(1 : nTrlsTrain); 
     test_trl_IDs = subset_trl_IDs(nTrlsTrain + 1 : end);
     
