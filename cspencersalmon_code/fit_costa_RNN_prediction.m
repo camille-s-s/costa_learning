@@ -99,17 +99,81 @@ nUnits = size(exp_data, 1);
 %% generate train trial ID list (if trained via multiple fcn calls)
 
 % define train/test split
-nTrlsIncluded = 100;
+nTrlsIncluded = 32;
 nUnitsIncluded = 25;
 [train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN, iTarget] = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrlsIncluded, nUnits, trainAllUnits, nUnitsIncluded);
 nPlasticUnits = length(iTarget);
+iNonTarget = find(~ismember(1 : nUnits, iTarget)); % sanity: assert(isempty(intersect(iNonTarget, iTarget)))
 
 %% snipping out most units
 
-% previous way: 0s in nonplastic rows
+% previous way: put 0s in nonplastic rows
 exp_data_tmp = zeros(size(exp_data));
 exp_data_tmp(iTarget, :) = exp_data(iTarget, :);
+
+% try cutting out some zero rows. for now this makes indexing useless
+nRmv = nUnits - (1 * nPlasticUnits);
+rmvdNonTargetUnits = randperm(length(iNonTarget), nRmv);
+exp_data_tmp(iNonTarget(rmvdNonTargetUnits), :) = []; % slice out zero rows at iNonTarget indices
 exp_data = exp_data_tmp; clearvars exp_data_tmp
+
+% old indexing now useless (unless you save rmvdNonTargetUnits, which I don't yet) - should fix
+nUnits = size(exp_data, 1); % sloppy overwrite
+iTarget = find(any(exp_data, 2));
+
+%% some memory/computational optimization attempts - testing this midway thru a run memory reasons!!! hopefully no bugs introduced!
+% inds_of_interest = [];
+% all_trl_IDs = [train_trl_IDs, test_trl_IDs]; 
+% for iTrlID = all_trl_IDs(1 : end)
+%     iStart = fixOnInds(iTrlID); % start of trial
+%     iStop = fixOnInds(iTrlID + 1) - 1; % right before start of next trial
+%     inds_of_interest = [inds_of_interest, iStart : iStop];
+% end
+% 
+% % put zeros in all data snippets not being used in current training/test set (helpful in dev for speeding up processing
+% % time!)
+% exp_data_zeroed = zeros(size(exp_data));
+% exp_data_zeroed(:, inds_of_interest) = exp_data(:, inds_of_interest); % sanity check: isequal(exp_data(:, inds_of_interest), exp_data_zeroed(:, inds_of_interest))
+% % here's the memory saving: make it sparse!
+% exp_data = sparse(exp_data_zeroed); 
+% 
+% allPossTS_zeroed = zeros(size(allPossTS));
+% allPossTS_zeroed(:, inds_of_interest) = allPossTS(:, inds_of_interest);
+% allPossTS = sparse(allPossTS_zeroed);
+% 
+% clearvars exp_data_zeroed allPossTS_zeroed inds_of_interest
+
+% another way, not involving using sparse or full but cutting down variable sized nonetheless
+training_inputs = cell(nTrlsTrain, 1);
+training_targets = cell(nTrlsTrain, 1);
+training_tData = cell(nTrlsTrain, 1);
+trl_num = 1;
+for iTrlID = train_trl_IDs(1 : end)
+    iStart = fixOnInds(iTrlID); % start of trial
+    iStop = fixOnInds(iTrlID + 1) - 1; % right before start of next trial
+    training_inputs{trl_num} = exp_data(:, iStart : iStop - 1);
+    training_targets{trl_num} = exp_data(:, iStart + 1 : iStop);
+    training_tData{trl_num} = allPossTS(iStart : iStop);
+    trl_num = trl_num + 1;
+end
+testing_inputs = cell(nTrlsTest, 1);
+testing_targets = cell(nTrlsTest, 1);
+testing_tData = cell(nTrlsTest, 1);
+trl_num = 1;
+for iTrlID = test_trl_IDs(1 : end)
+    iStart = fixOnInds(iTrlID); % start of trial
+    iStop = fixOnInds(iTrlID + 1) - 1; % right before start of next trial
+    testing_inputs{trl_num} = exp_data(:, iStart : iStop - 1);
+    testing_targets{trl_num} = exp_data(:, iStart + 1 : iStop);
+    testing_tData{trl_num} = allPossTS(iStart : iStop);
+    trl_num = trl_num + 1;
+end
+
+clearvars exp_data allPossTS
+%%
+% lgc_inds_of_non_interest = ~ismember(1 : size(exp_data, 2), inds_of_interest);
+% lgc_inds_of_interest = ismember(1 : size(exp_data, 2), inds_of_interest);
+% exp_data_zeroed = exp_data; exp_data_zeroed(:, lgc_inds_of_non_interest) = 0;
 
 % 11_27_22 different way of doing this with repeated rows as opposed to 0s in rows that aren't plastic
 % exp_data_tmp = zeros(size(exp_data));
@@ -128,11 +192,6 @@ exp_data = exp_data_tmp; clearvars exp_data_tmp
 % assert(numel(unique(mean(exp_data_tmp, 2))) == nPlasticUnits + 1) % sanity check that the substitution went 
 % exp_data = exp_data_tmp; clearvars exp_data_tmp
 
-% TO DO: ADD CHECK FOR IF TRAIN AND TEST iTARGET ARE THE SAME!!! IN PLOT COSTA OUTPUTS WRAPPER)
-% all_iTargets = cell2mat(arrayfun(@(iTrl) getfield(load([rnnSubDir, dir([rnnSubDir, RNNname, ...
-%     '_train_trl', num2str(train_trl_IDs(iTrl)), ...
-%     '_num', num2str(iTrl) '.mat']).name]), 'RNN', 'mdl', 'iTarget'), 1 : nTrlsTrain, 'un', 0)');
-
 %%
 if trainRNN % TRAIN
     
@@ -146,11 +205,12 @@ if trainRNN % TRAIN
         fprintf([RNNname, ': training trial ', num2str(iTrlID), ', #=', num2str(trl_num), '...\n'])
         tic
         
-        iStart = fixOnInds(iTrlID); % start of trial
-        iStop = fixOnInds(iTrlID + 1) - 1; % right before start of next trial
-        inputs = exp_data(:, iStart : iStop - 1);
-        targets = exp_data(:, iStart + 1 : iStop);
-        tData = allPossTS(iStart : iStop); nsp_Data = length(tData); % timeVec for current data
+        % iStart = fixOnInds(iTrlID); % start of trial
+        % iStop = fixOnInds(iTrlID + 1) - 1; % right before start of next trial
+        inputs = training_inputs{trl_num}; % exp_data(:, iStart : iStop - 1);
+        targets = training_targets{trl_num}; % exp_data(:, iStart + 1 : iStop);
+        tData = training_tData{trl_num}; % allPossTS(iStart : iStop);
+        nsp_Data = length(tData); % timeVec for current data
         tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN); % timevec for RNN
         
         % initialize DI matrix J
@@ -184,7 +244,7 @@ if trainRNN % TRAIN
         PJ = alpha * eye(nUnits); % dim are pN x pN where p=fraction of neurons to modify - here it's all of them
         % PJ = alpha * eye(nPlasticUnits); % dim are pN x pN where p=fraction of neurons to modify - here it's all of them
         
-        if plotStatus
+        if plotStatus && ismember(trl_num, floor(linspace(1, nTrlsTrain, 6)))
             f = figure('color', 'w', 'Position', [100 100 1900 750]);
             axNum = 0;
             f2 = figure('color', 'w', 'Position', [100 100 1900 500]);
@@ -208,14 +268,14 @@ if trainRNN % TRAIN
                 R(:, t) = tanh(H); % generate output / compute next RNN step
                 
                 % % % % % % % % % % % UPDATE TERM SECTION % % % % % % % % % % %
-                if iLearn > 1
-                    JR(:, t) = J * R(:, t) + R(:, iModelSample(iLearn - 1));
-                else
-                    JR(:, t) = J * R(:, t) + R(:, 1);
+                % continuous feedback only after you've done your first weight update based on error between prediction and target
+                if iLearn < 2
+                    feedback_term = 0; % R(:, 1); 
+                else % 1step: inputs(:, iLearn) (at all iLearn)
+                    feedback_term = R(:, t - 1); % prev: R(:, iModelSample(iLearn - 1)); goal is to get to - dtFactor
                 end
                 
-                % JR(:, t) = J * R(:, t) + inputs(:, iLearn); % one-step prediction
-                % JR(:, t) = J(:, :) * R(:, t) + R(:, t - 1);       
+                JR(:, t) = J * R(:, t) + feedback_term;
                 % % % % % % % % % % % UPDATE TERM SECTION % % % % % % % % % % %
                 
                 H = H + dtRNN * (-H + JR(:, t)) / tauRNN; % "hidden" activity updated w the update term, p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
@@ -243,18 +303,19 @@ if trainRNN % TRAIN
             mean_MSE_over_runs(nRun) = mean(MSE_over_steps);
             sum_MSE_over_runs(nRun) = sum(MSE_over_steps);
             
-            if ismember(nRun, [1 250 nRunTrain])
+            if ismember(nRun, [1 250 nRunTrain]) && ismember(trl_num, floor(linspace(1, nTrlsTrain, 6)))
                 axNum = axNum + 1;
                 plot_costa_RNN_param_comparisons(f2, axs, [RNNname(5 : end), ' (ID: ', num2str(iTrlID), ' / # ', num2str(trl_num), '):'], nPlasticUnits, targets(iTarget, :), R(iTarget, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, MSE_over_steps, axNum)
             end
         end
         
         if plotStatus
-            if ismember(trl_num, [1 2 3 nTrlsTrain])
+            if ismember(trl_num, floor(linspace(1, nTrlsTrain, 6)))
                 set(0, 'currentfigure', f2);
                 print('-dtiff', '-r400', [rnnSubDir, RNNname, '_train_trl', num2str(iTrlID), '_num', num2str(trl_num)])
                 set(0, 'currentfigure', f);
-                plot_costa_RNN_progress(f, nPlasticUnits, targets(iTarget, :), R(iTarget, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, sum_MSE_over_runs, trainRNN, '')
+                % plot_costa_RNN_progress(f, nPlasticUnits, targets(iTarget, :), R(iTarget, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, sum_MSE_over_runs, trainRNN, '')
+                plot_costa_RNN_progress(f, nUnits, targets(:, :), R(:, iModelSample), tRNN(:, iModelSample), tData, nRun, pVars, sum_MSE_over_runs, trainRNN, '')
                 fAxs = findall(f, 'type', 'axes'); set(fAxs(2), 'ylim', [-0.2 1]);
                 print('-dtiff', '-r400', [rnnSubDir, RNNname, '_train_trl', num2str(iTrlID), '_num', num2str(trl_num), '_overall'])
             end
@@ -263,7 +324,7 @@ if trainRNN % TRAIN
         % package up and save outputs
         [RNN] = make_RNN_struct(trainRNN, doSmooth, smoothWidth, meanSubtract, doSoftNorm, normByRegion, rmvOutliers, ...
             outliers, rnnDir, RNNname, dtFactor, g, alpha, tauRNN, tauWN, ampInWN, ampWN, nRunTrain, nonlinearity, ...
-            nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, rModelSample, [], [], [], ...
+            nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, R(:, iModelSample), [], [], [], ...
             dtRNN, dtData, J, J0, [], [], sum_MSE_over_runs, mean_MSE_over_runs, pVars, stdData, iTarget);
         
         if saveMdl
@@ -277,6 +338,12 @@ if trainRNN % TRAIN
     end
     
 else % TEST
+    
+    all_iTargets = cell2mat(arrayfun(@(iTrl) getfield(load([rnnSubDir, dir([rnnSubDir, RNNname, ...
+        '_train_trl', num2str(train_trl_IDs(iTrl)), ...
+        '_num', num2str(iTrl) '.mat']).name]), 'RNN', 'mdl', 'iTarget'), 1 : nTrlsTrain, 'un', 0)');
+    
+    assert(isequal(unique(all_iTargets, 'rows'), iTarget)) % all iTargets for all trials in training set must be identical and equal to iTarget
     
     % get convergence metrics so you can compare train/test
     all_pVars = cell2mat(arrayfun(@(iTrl) getfield(load([rnnSubDir, dir([rnnSubDir, RNNname, ...
@@ -319,11 +386,12 @@ else % TEST
         fprintf([RNNname, ': testing trial ', num2str(iTrlID), ', #=', num2str(trl_num), '...'])
         tic
         
-        iStart = fixOnInds(iTrlID);
-        iStop = fixOnInds(iTrlID + 1) - 1;
-        inputs = exp_data(:, iStart : iStop - 1);
-        targets = exp_data(:, iStart + 1 : iStop);
-        tData = allPossTS(iStart : iStop); nsp_Data = length(tData);
+        % iStart = fixOnInds(iTrlID);
+        % iStop = fixOnInds(iTrlID + 1) - 1;
+        inputs = testing_inputs{trl_num}; % exp_data(:, iStart : iStop - 1);
+        targets = testing_targets{trl_num}; % exp_data(:, iStart + 1 : iStop);
+        tData = testing_tData{trl_num}; % allPossTS(iStart : iStop);
+        nsp_Data = length(tData);
         tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN);
         
         stdData_test(trl_num)  = std(reshape(inputs(iTarget, :), nPlasticUnits * (nsp_Data - 1), 1));
@@ -342,15 +410,15 @@ else % TEST
             f = figure('color', 'w', 'Position', [100 100 1900 750]);
         end
         
-        % TEMPORARY 2022-10-25 FOR PLOTTING PROGRESS AS WE TWEAK PARAMETERS
-        if plotStatus
-                        f = figure('color', 'w', 'Position', [100 100 1900 750]);
-        axNum = 0;
-        f2 = figure('color', 'w', 'Position', [100 100 1900 500]);
-        axs = arrayfun( @(i) subplot(1, 4, i, 'NextPlot', 'add', 'box', 'off', 'tickdir', 'out', 'fontsize', 12, 'fontweight', 'bold'), 1 : 4);
-        paramText = sprintf(['TESTING\nkernel = \t', num2str(smoothWidth), '\ng = \t', num2str(g), '\nP_0 = \t', num2str(alpha), '\ntau_R_N_N = \t', num2str(tauRNN), '\ntau_W_N = \t', num2str(tauWN), '\nw_W_N = \t', num2str(ampInWN), '\nn_i_t_e_r = \t', num2str(nRunTrain), '\ndt_D_a_t_a = \t', num2str(dtData), '\ndt_R_N_N = \t', num2str(dtRNN)  ]); % this at the end!
-        text(axs(4), 0.25 * range(get(axs(4), 'xlim')), 0.75 * range(get(axs(4), 'ylim')), paramText, 'fontsize', 14, 'fontweight', 'bold', 'horizontalalignment', 'center')
-        set(axs(4), 'xtick', '', 'ytick', '')
+        % plot progress as we tweak parameters
+        if plotStatus && ismember(trl_num, floor(linspace(1, nTrlsTest, 6)))
+            f = figure('color', 'w', 'Position', [100 100 1900 750]);
+            axNum = 0;
+            f2 = figure('color', 'w', 'Position', [100 100 1900 500]);
+            axs = arrayfun( @(i) subplot(1, 4, i, 'NextPlot', 'add', 'box', 'off', 'tickdir', 'out', 'fontsize', 12, 'fontweight', 'bold'), 1 : 4);
+            paramText = sprintf(['TESTING\nkernel = \t', num2str(smoothWidth), '\ng = \t', num2str(g), '\nP_0 = \t', num2str(alpha), '\ntau_R_N_N = \t', num2str(tauRNN), '\ntau_W_N = \t', num2str(tauWN), '\nw_W_N = \t', num2str(ampInWN), '\nn_i_t_e_r = \t', num2str(nRunTrain), '\ndt_D_a_t_a = \t', num2str(dtData), '\ndt_R_N_N = \t', num2str(dtRNN)  ]); % this at the end!
+            text(axs(4), 0.25 * range(get(axs(4), 'xlim')), 0.75 * range(get(axs(4), 'ylim')), paramText, 'fontsize', 14, 'fontweight', 'bold', 'horizontalalignment', 'center')
+            set(axs(4), 'xtick', '', 'ytick', '')
         end
         
         %% loop through testing runs
@@ -367,14 +435,14 @@ else % TEST
                 R_test(:, t) = tanh(H); % generate output
                 
                 % % % % % % % % % % % UPDATE TERM SECTION % % % % % % % % % % %
-                if iLearn > 1
-                    JR_test(:, t) = J_test * R_test(:, t) + R_test(:, iModelSample_test(iLearn - 1)); % update term with previous output (at RNN timepoints coinciding with datapoints)
-                else
-                    JR_test(:, t) = J_test * R_test(:, t) + R_test(:, 1); % add nothing!
+                % continuous feedback only after you've done your first weight update based on error between prediction and target
+                if iLearn < 2
+                    feedback_term = 0; % R_test(:, 1);
+                else % 1step: inputs(:, iLearn) (at all iLearn)
+                    feedback_term = R_test(:, t - 1); % prev: R_test(:, iModelSample_test(iLearn - 1))
                 end
                 
-                % JR_test(:, t) = J_test * R_test(:, t) + inputs(:, iLearn); % one-step prediction
-                % JR_test(:, t) = J_test * R_test(:, t) + R_test(:, t - 1);
+                JR_test(:, t) = J_test * R_test(:, t) + feedback_term;
                 % % % % % % % % % % % UPDATE TERM SECTION % % % % % % % % % % %
                 
                 H = H + dtRNN * (-H + JR_test(:, t)) / tauRNN;
@@ -393,28 +461,29 @@ else % TEST
             mean_MSE_over_runs_test(trl_num, nRun) = mean(MSE_over_steps_test);
             sum_MSE_over_runs_test(trl_num, nRun) = sum(MSE_over_steps_test);
             
-            if ismember(nRun, [1 250 nRunTrain])
+            if ismember(nRun, [1 250 nRunTrain]) && ismember(trl_num, floor(linspace(1, nTrlsTest, 6)))
                 axNum = axNum + 1;
                 plot_costa_RNN_param_comparisons(f2, axs, [RNNname(5 : end), ' (ID: ', num2str(iTrlID), ' / # ', num2str(trl_num), '):'], nPlasticUnits, targets(iTarget, :), R_test(iTarget, iModelSample_test), tRNN(:, iModelSample_test), tData, nRun, pVars_test(trl_num), MSE_over_steps_test, axNum)
             end
         end
         
         if plotStatus
-            if ismember(trl_num, [1 2 3])
-                set(0, 'currentfigure', f2);
-                print('-dtiff', '-r400', [rnnSubDir, RNNname, '_test_trl', num2str(iTrlID), '_num', num2str(trl_num)])
-                set(0, 'currentfigure', f);
-                fTitle = ['[', RNNname, ']: test trial ID ', num2str(iTrlID), ' (#', num2str(trl_num), ')'];
-                plot_costa_RNN_progress(f, nPlasticUnits, targets(iTarget, :), R_test(iTarget, iModelSample_test), tRNN(:, iModelSample_test), tData, nRun, pVars_test(trl_num, nRun), MSE_over_steps_test, trainRNN, fTitle)
-                fAxs = findall(f, 'type', 'axes'); set(fAxs(2), 'ylim', [-0.2 1]);
-                print('-dtiff', '-r400', [rnnSubDir, RNNname, '_test_trl', num2str(iTrlID), '_num', num2str(trl_num), '_overall'])
+            if ismember(trl_num, floor(linspace(1, nTrlsTest, 6)))
+            set(0, 'currentfigure', f2);
+            print('-dtiff', '-r400', [rnnSubDir, RNNname, '_test_trl', num2str(iTrlID), '_num', num2str(trl_num)])
+            set(0, 'currentfigure', f);
+            fTitle = ['[', RNNname, ']: test trial ID ', num2str(iTrlID), ' (#', num2str(trl_num), ')'];
+            % plot_costa_RNN_progress(f, nPlasticUnits, targets(iTarget, :), R_test(iTarget, iModelSample_test), tRNN(:, iModelSample_test), tData, nRun, pVars_test(trl_num, nRun), MSE_over_steps_test, trainRNN, fTitle)
+            plot_costa_RNN_progress(f, nUnits, targets(:, :), R_test(:, iModelSample_test), tRNN(:, iModelSample_test), tData, nRun, pVars_test(trl_num, nRun), MSE_over_steps_test, trainRNN, fTitle)
+            fAxs = findall(f, 'type', 'axes'); set(fAxs(2), 'ylim', [-0.2 1]);
+            print('-dtiff', '-r400', [rnnSubDir, RNNname, '_test_trl', num2str(iTrlID), '_num', num2str(trl_num), '_overall'])
             end
         end
         
         % package up and save outputs
         RNN = make_RNN_struct(trainRNN, doSmooth, smoothWidth, meanSubtract, doSoftNorm, normByRegion, rmvOutliers, ...
             outliers, rnnDir, RNNname, dtFactor, g, alpha, tauRNN, tauWN, ampInWN, ampWN, nRunTrain, nonlinearity, ...
-            nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, rModelSample_test, [], [], [], ...
+            nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, R_test(:, iModelSample_test), [], [], [], ...
             dtRNN, dtData, J_test, [], [], [], sum_MSE_over_runs_test, mean_MSE_over_runs_test, pVars_test, stdData_test, iTarget);
         
         if saveMdl
