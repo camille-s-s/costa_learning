@@ -14,7 +14,7 @@ end
 % cleaning: outlier removal
 if rmvOutliers
     
-    outliers = isoutlier(mean(exp_data, 2), 'percentiles', [10 100]);
+    outliers = isoutlier(mean(exp_data, 2), 'percentiles', [5 100]);
     exp_data = exp_data(~outliers, :);
     arrayUnit = arrayUnit(~outliers, :);
     
