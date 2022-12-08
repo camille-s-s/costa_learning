@@ -5,7 +5,7 @@ set(0, 'currentfigure', f2);
 axsXLbls = {'time (s)'};
 axsYLims = [-0.1 0.4];
 axsYLbls = {'activity'};
-idx = randi(nUnits);
+idx = 1; % randi(nUnits);
 
 % do this outside of function
 % f2 = figure('color', 'w', 'Position', [100 100 1900 750]);
