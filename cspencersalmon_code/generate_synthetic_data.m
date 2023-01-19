@@ -1,4 +1,4 @@
-function synthetic_trials = generate_synthetic_data(training_inputs, unit_indices, n_waves, pct_jitter, trl_fraction, smoothWidth, dtData)
+function [synthetic_trials, mean_FR_synthetic, std_FR_synthetic] = generate_synthetic_data(training_inputs, unit_indices, n_waves, pct_jitter, trl_fraction, smoothWidth, dtData)
 % make square wave using n_waves, wave_dur, wave_height
 % INPUTS: training_inputs, n_waves, pct_jitter, trl_fraction, smoothWidth, dtData
 % n_waves = 1;
@@ -21,7 +21,7 @@ inputs_mat = cell2mat(training_inputs');
 mean_FR = mean(inputs_mat, 2);
 std_FR = std(inputs_mat, [], 2);
 mean_FR_all = mean(mean(inputs_mat, 2));
-wave_height = (1 / trl_fraction) * mean_FR_all; 
+wave_height = mean_FR_all + 2 * mean(std_FR); % (1 / trl_fraction) * mean_FR_all; 
 
 % choose wave dur. initially, want mean FR synthetic trial == mean_train_FR_all, same dur all units all trials
 mean_sp = mean(nsp_trial);
@@ -71,6 +71,10 @@ for iTrl = 1 : n_trls
     % stick it in the cell for all trials
     synthetic_trials{iTrl} = synthetic_data;
 end
+
+mean_FR_synthetic = mean(cell2mat(synthetic_trials'), 2);
+std_FR_synthetic = std(cell2mat(synthetic_trials'), [], 2);
+
 end
 
 
