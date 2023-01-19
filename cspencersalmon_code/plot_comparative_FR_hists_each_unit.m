@@ -1,4 +1,4 @@
-function plot_comparative_FR_hists_each_unit(nBins, nUnits, nPredict, max_count, lower_thresh, upper_thresh, Rsample, targets, fig_title)
+function plot_comparative_FR_hists_each_unit(nBins, nUnits, nPredict, max_count, lower_thresh, upper_thresh, Rsample, targets, fig_title, use_reservoir)
 % for use with fit_costa_RNN_prediction
 % CSS 2022
 %
@@ -9,12 +9,21 @@ function plot_comparative_FR_hists_each_unit(nBins, nUnits, nPredict, max_count,
 
 % set up
 fig_title(strfind(fig_title, '_')) = ' ';
+if exist('use_reservoir', 'var')
+    if use_reservoir
+        nUnits = size(targets, 1);
+        nPredict = nUnits;
+    end
+else
+    use_reservoir = false;
+end
+        
 axDim = ceil(sqrt(nPredict));
 halfAxDim = floor(axDim / 2);
 min_FR = min([min(Rsample(:)), min(targets(:))]);
 max_FR = max([max(Rsample(:)), max(targets(:))]);
 
-if min_FR <= -1 || max_FR > 1
+if min_FR < -1 || max_FR > 1
     disp('you got some weird FR values here!')
     keyboard
 end
