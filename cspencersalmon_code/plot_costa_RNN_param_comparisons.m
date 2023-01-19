@@ -40,7 +40,7 @@ ylabel(axs(axNum), axsYLbls)
 
 % example trace model vs target comparison of a single unit
 plot(axs(axNum), tRNN, R(idx, :), 'linewidth', 1.5)
-plot(axs(axNum), tData(2 : end), targets(idx, :), 'linewidth', 1.5)
+plot(axs(axNum), tData, targets(idx, :), 'linewidth', 1.5)
 
 if axNum == 1
     legend(axs(axNum), 'model', 'target', 'location', 'northwest')
