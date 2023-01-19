@@ -14,7 +14,7 @@ fig_title(strfind(fig_title, '_')) = ' ';
 min_FR = min([min(Rsample(:)), min(targets(:))]);
 max_FR = max([max(Rsample(:)), max(targets(:))]);
 
-if min_FR <= -1 || max_FR > 1
+if min_FR < -1 || max_FR > 1
     disp('you got some weird FR values here!')
     keyboard
 end
