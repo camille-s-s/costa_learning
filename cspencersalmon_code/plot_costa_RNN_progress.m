@@ -45,7 +45,7 @@ text(axs(2), 0.75 * range(get(axs(2), 'xlim')), 1.15 * max(get(axs(2), 'ylim')),
 
 % example trace model vs target comparison of a single unit
 plot(axs(3), tRNN, R(idx, :), 'linewidth', 1.5)
-plot(axs(3), tData(2 : end), targets(idx, :), 'linewidth', 1.5)
+plot(axs(3), tData, targets(idx, :), 'linewidth', 1.5)
 legend(axs(3), 'model', 'target', 'location', 'northeast')
 
 if trainRNN % chi2 over training runs
