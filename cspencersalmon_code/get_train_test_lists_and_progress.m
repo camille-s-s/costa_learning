@@ -1,4 +1,4 @@
-function [train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN, iTarget] = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrlsIncluded, nUnits, trainAllUnits, nUnitsIncluded)
+function [train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN, iPredict] = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrlsIncluded, nUnits, trainAllUnits, nUnitsIncluded)
 % input: rnnDir, RNNname, nTrlsIncluded, trainAllUnits
 % output: train_trl_IDs, test_trl_IDs, start_trl_num, prevJ, trainRNN
 
@@ -17,22 +17,22 @@ if ~isfile([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat']
     test_trl_IDs = subset_trl_IDs(nTrlsTrain + 1 : end);
     
     if trainAllUnits
-        iTarget = 1 : nUnits;
+        iPredict = 1 : nUnits;
     else
-        iTarget = sort(randperm(nUnits, nUnitsIncluded)); % nUnitsIncluded unique indices selected randomly from 1 : nUnits
+        iPredict = sort(randperm(nUnits, nUnitsIncluded)); % nUnitsIncluded unique indices selected randomly from 1 : nUnits
     end
     
-    save([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat'], 'train_trl_IDs', 'test_trl_IDs', 'iTarget')
+    save([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat'], 'train_trl_IDs', 'test_trl_IDs', 'iPredict')
     start_trl_num = 1;
     trainRNN = true;
 
-% if list already initialized, check to see how far you are in it, and load iTarget as well
+% if list already initialized, check to see how far you are in it, and load iPredict as well
 else
-    load([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat'], 'train_trl_IDs', 'test_trl_IDs', 'iTarget')
+    load([rnnDir, 'train_test_lists' filesep, RNNname, '_train_test_list.mat'], 'train_trl_IDs', 'test_trl_IDs', 'iPredict')
     if strcmp(called_by, 'fit_costa_RNN_prediction') || strcmp(called_by, 'fit_costa_RNN_1step_prediction') % if prediction
-        prevMdls = dir([rnnSubDir, RNNname, '_train_trl*_num*.mat']);
+        prevMdls = dir([rnnSubDir, RNNname, '_train*_num*.mat']);
         trl_IDs_in_dir = arrayfun(@(i) ...
-            str2double(prevMdls(i).name(strfind(prevMdls(i).name, 'trl') + 3 : strfind(prevMdls(i).name, '_num') - 1)), ...
+            str2double(prevMdls(i).name(strfind(prevMdls(i).name, 'train') + 5 : strfind(prevMdls(i).name, '_num') - 1)), ...
             1 : length(prevMdls));
     elseif strcmp(called_by, 'fit_costa_RNN_v3') % if descriptive
         prevMdls = dir([rnnSubDir, RNNname, '_set*_trl*.mat']);
@@ -62,7 +62,7 @@ if start_trl_num > 1
     
     if strcmp(called_by, 'fit_costa_RNN_prediction') || strcmp(called_by, 'fit_costa_RNN_1step_prediction') % if predictive
         prevMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, ...
-            '_train_trl', num2str(train_trl_IDs(last_completed_trl_num)), '_num', num2str(last_completed_trl_num), '.mat']).name]);
+            '_train', num2str(train_trl_IDs(last_completed_trl_num)), '_num', num2str(last_completed_trl_num), '.mat']).name]);
     elseif strcmp(called_by, 'fit_costa_RNN_v3') % if descriptive
           prevMdl = load([rnnSubDir, dir([rnnSubDir, RNNname, ...
         '_set*_trl', num2str(train_trl_IDs(last_completed_trl_num)), '.mat']).name]);
@@ -71,14 +71,14 @@ if start_trl_num > 1
     end
     
     prevJ = prevMdl.RNN.mdl.J;
-    % iTarget = prevMdl.RNN.mdl.iTarget;
+    % iPredict = prevMdl.RNN.mdl.iPredict;
     prev_trl_ID = prevMdl.RNN.mdl.train_trl;
     assert(prev_trl_ID == train_trl_IDs(last_completed_trl_num))
     
 else
     
     prevJ = [];
-    % iTarget = [];
+    % iPredict = [];
     
 end
 
