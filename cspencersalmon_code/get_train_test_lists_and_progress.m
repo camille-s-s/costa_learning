@@ -1,4 +1,4 @@
-function [train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, trainRNN, iPredict] = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrlsIncluded, nUnits, trainAllUnits, nUnitsIncluded)
+function [train_trl_IDs, test_trl_IDs, nTrlsTrain, nTrlsTest, start_trl_num, prevJ, prev_w_out, trainRNN, iPredict] = get_train_test_lists_and_progress(rnnDir, rnnSubDir, RNNname, nTrlsIncluded, nUnits, trainAllUnits, nUnitsIncluded)
 % input: rnnDir, RNNname, nTrlsIncluded, trainAllUnits
 % output: train_trl_IDs, test_trl_IDs, start_trl_num, prevJ, trainRNN
 
@@ -71,6 +71,11 @@ if start_trl_num > 1
     end
     
     prevJ = prevMdl.RNN.mdl.J;
+    try
+        prev_w_out = prevMdl.RNN.mdl.w_out;
+    catch
+        prev_w_out = []; % backwards compatibility
+    end
     % iPredict = prevMdl.RNN.mdl.iPredict;
     prev_trl_ID = prevMdl.RNN.mdl.train_trl;
     assert(prev_trl_ID == train_trl_IDs(last_completed_trl_num))
@@ -78,6 +83,7 @@ if start_trl_num > 1
 else
     
     prevJ = [];
+    prev_w_out = [];
     % iPredict = [];
     
 end
