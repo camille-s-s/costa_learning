@@ -10,7 +10,7 @@ mdl_dirs = mdl_dirs(~cell2mat(arrayfun(@(i) any(strfind(mdl_paths{i}, 'ARCHIVE')
 mdl_paths = mdl_paths(~cell2mat(arrayfun(@(i) any(strfind(mdl_paths{i}, 'ARCHIVE')), 1 : length(mdl_paths), 'un', 0)'));
 
 % make the header
-csv_header_1 = {'parent_dir', 'ntwk_flavor', '#predicted', '#trials', '#iter', '#pred_steps', 'is_reservoir', 'use_synthetic_targets', 'has_readout_unit', 'noisy_update', 'ampInWN', 'smoothwidth', 'tau_RNN', 'tau_WN', 'dtData', 'dtRNN', 'g', 'P0'};
+csv_header_1 = {'parent dir', 'ntwk flavor', '#predicted', '#trials', '#iter', '#pred steps', 'is reservoir', 'use synthetic targets', 'has readout unit', 'noisy update', 'ampInWN', 'smoothwidth', 'tau RNN', 'tau WN', 'dtData', 'dtRNN', 'g', 'P0'};
 csv_header_2 = {'MAE (train)', 'MSE (train)', 'RMSE (train)', 'pVar (train)'};
 csv_header_3 = {'MAE (test)', 'MSE (test)', 'RMSE (test)', 'pVar (test)'};
 csv_header = [csv_header_1, csv_header_2, csv_header_3];
@@ -23,10 +23,14 @@ csv_vals = cell(n_rows, n_cols);
 % load all versions (each is a row)
 for iMdl = 1 : length(mdl_paths) 
     metrics_file = mdl_paths{iMdl};
-    parent_dir = mdl_dirs(iMdl).folder(max(strfind(mdl_dirs(iMdl).folder, filesep)) + 1 : end);
+    parent_dir = mdl_dirs(iMdl).folder(max(strfind(mdl_dirs(iMdl).folder, filesep)) + 3 : end);
     
     load(metrics_file)
     P = currentParams;
+    
+    % TO DO: ADD TRIAL RANGE!!!!
+    all_trls = [P.train_trl_IDs, P.test_trl_IDs];
+    trl_range = [min(all_trls) max(all_trls)];
     
     % older structs may not have these fields
     if ~isfield(P, 'add_readout_unit') % default is no
