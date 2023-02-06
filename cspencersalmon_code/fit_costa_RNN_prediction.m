@@ -19,7 +19,6 @@ g                       = 1.5;                  % instability (chaos); g<1=dampe
 tauRNN                  = 0.001;                % decay costant of RNN units ?in msec
 tauWN                   = 0.1;                  % decay constant on filtered white noise inputs
 ampInWN                 = 0.001;                % input amplitude of filtered white noise
-
 %% training params
 alpha                   = 1;                    % overall learning rate for regularizer
 nonlinearity            = @tanh;                % inline function for nonlinearity
@@ -36,20 +35,17 @@ nReplicates             = [];                   % default no. if use_reservoir =
 use_synthetic_targets   = false;                % default no. instead of real data, fake data
 add_readout_unit        = false;
 add_white_noise         = false; 
-
 %% output options
 plotStatus              = true;
 saveMdl                 = true;
 nBins                   = 50;
-
 %% directory setup + final param setup
-% overwrite defaults based on inputs
+
 if exist('params', 'var')
     assignParams(who, params);
 end
 
-% define output directories
-rnnDir          = ['~/Dropbox (BrAINY Crew)/costa_learning/models/', mouseVer, filesep];
+rnnDir          = ['~/Dropbox (BrAINY Crew)/costa_learning/models/', mouseVer, filesep]; % define output directories
 rnnSubDir       = [rnnDir, RNNname(strfind(RNNname, '_') + 1 : end), filesep];
 if ~isfolder(rnnSubDir)
     mkdir(rnnSubDir)
@@ -57,7 +53,7 @@ end
 if ~isfolder([rnnDir, 'train_test_lists'])
     mkdir([rnnDir, 'train_test_lists'])
 end
-if ~isfolder([rnnDir 'exp_data' filesep]) % separate subdir for exp_data ( inputs=exp_data(t), targets=exp_data(t+1) )
+if ~isfolder([rnnDir 'exp_data' filesep]) 
     mkdir([rnnDir 'exp_data' filesep])
 end
 
@@ -74,14 +70,12 @@ mdl_version_dir = [mdl_version_dir filesep];
 if ~isfolder([rnnSubDir, mdl_version_dir])
     mkdir([rnnSubDir, mdl_version_dir])
 end
+
 rnnSubDir = [rnnSubDir, mdl_version_dir];
 
 % set up final params
 dtRNN           = dtData / dtFactor;    % time step (in s) for integration
 ampWN           = sqrt( tauWN / dtRNN );
-if use_synthetic_targets % more WN for synthetic. WIP. TO DO: MUST INVESTIGATE MORE
-    ampInWN = 10 * ampInWN;
-end
 
 %% preprocess targets by smoothing, normalizing, re-scaling, and outlier removing, or load previous
 if ~isfile([rnnDir 'exp_data' filesep, RNNname, '_exp_data.mat'])
@@ -123,27 +117,18 @@ iPredict = find(any(exp_data, 2));
 
 %% cut down variable size for memory saving
 if use_synthetic_targets
-    % if isfile([rnnDir 'exp_data' filesep, RNNname, '_exp_data_synthetic.mat'])
-        % load([rnnDir 'exp_data' filesep, RNNname, '_exp_data_synthetic.mat'], 'training_inputs', 'training_targets', 'testing_inputs', 'testing_targets')
-    % else
         % grab full set
         training_data = arrayfun(@(iTrlID) exp_data(:, fixOnInds(iTrlID) : fixOnInds(iTrlID + 1) - 1), train_trl_IDs(1 : end), 'un', 0)';
         testing_data = arrayfun(@(iTrlID) exp_data(:, fixOnInds(iTrlID) : fixOnInds(iTrlID + 1) - 1), test_trl_IDs(1 : end), 'un', 0)';
         all_data = [training_data; testing_data];
-        
         % make the fakes
         synthetic_data  = generate_synthetic_data(all_data, 1 : nReplicates : nUnits, 1, 0.1, 1/4, smoothWidth, dtData);
-        
         % split the fakes into inputs and targets separated by n_pred_steps
         synthetic_inputs = arrayfun(@(iTrlNum) synthetic_data{iTrlNum}(:, 1 : end - n_pred_steps), 1 : (nTrlsTrain + nTrlsTest), 'un', 0)';
         synthetic_targets = arrayfun(@(iTrlNum) synthetic_data{iTrlNum}(:, 1 + n_pred_steps : end), 1 : (nTrlsTrain + nTrlsTest), 'un', 0)';
-        
         % split back into train and test again
         training_inputs = synthetic_inputs(1 : nTrlsTrain);             training_targets = synthetic_targets(1 : nTrlsTrain);
         testing_inputs = synthetic_inputs(nTrlsTrain + 1 : end);        testing_targets = synthetic_targets(nTrlsTrain + 1 : end);
-        
-        % save([rnnDir 'exp_data' filesep, RNNname, '_exp_data_synthetic.mat'], 'training_inputs', 'training_targets', 'testing_inputs', 'testing_targets')
-    % end
 else % DEFAULT
     training_inputs = arrayfun(@(iTrlID) exp_data(:, fixOnInds(iTrlID) : fixOnInds(iTrlID + 1) - 1 - n_pred_steps), train_trl_IDs(1 : end), 'un', 0)';
     training_targets = arrayfun(@(iTrlID) exp_data(:, fixOnInds(iTrlID) + n_pred_steps : fixOnInds(iTrlID + 1) - 1), train_trl_IDs(1 : end), 'un', 0)';
@@ -159,6 +144,10 @@ tmp_vals = [cell2mat(training_targets'), cell2mat(testing_targets')];
 [~, lower_FR_thresh, upper_FR_thresh] = isoutlier(tmp_vals(:), 'percentiles', [0.5 99.5]);
 clearvars exp_data allPossTS all_data synthetic_data synthetic_inputs synthetic_targets training_data testing_data tmp_vals fixOnInds
 
+% set up labels for plots
+paramText_train = sprintf(['TRAINING\nkernel = \t', num2str(smoothWidth), '\nn_t_r_l_s = \t', num2str(length([train_trl_IDs, test_trl_IDs])), '\ng = \t', num2str(g), '\nP_0 = \t', num2str(alpha), '\ntau_R_N_N = \t', num2str(tauRNN), '\ntau_W_N = \t', num2str(tauWN), '\nw_W_N = \t', num2str(ampInWN), '\nn_i_t_e_r = \t', num2str(nRunTrain), '\ndt_D_a_t_a = \t', num2str(dtData), '\ndt_R_N_N = \t', num2str(dtRNN)  ]); % this at the end!
+paramText_test = sprintf(['TESTING\nkernel = \t', num2str(smoothWidth), '\nn_t_r_l_s = \t', num2str(length([train_trl_IDs, test_trl_IDs])), '\ng = \t', num2str(g), '\nP_0 = \t', num2str(alpha), '\ntau_R_N_N = \t', num2str(tauRNN), '\ntau_W_N = \t', num2str(tauWN), '\nw_W_N = \t', num2str(ampInWN), '\nn_i_t_e_r = \t', num2str(nRunTrain), '\ndt_D_a_t_a = \t', num2str(dtData), '\ndt_R_N_N = \t', num2str(dtRNN)  ]);
+
 %% reading for training loop!
 if trainRNN % TRAIN
     clearvars testing_inputs testing_targets testing_tData
@@ -166,15 +155,17 @@ if trainRNN % TRAIN
     for iTrlID = train_trl_IDs(start_trl_num : end)
         fprintf('\n')
         fprintf([RNNname, ': training trial ', num2str(iTrlID), ', #=', num2str(trl_num), '...\n']), tic
-        inputs = training_inputs{trl_num}; % exp_data(:, iStart : iStop - 1);
+            
+        inputs = training_inputs{trl_num}; 
         switch ntwk_flavor
             case 'descriptive'
                 targets = inputs;
             case {'1step', 'generative'}  
-                targets = training_targets{trl_num}; % exp_data(:, iStart + 1 : iStop);
+                targets = training_targets{trl_num};
         end
-        tData = training_tData{trl_num}; nsp_Data = length(tData); % timeVec for current data % allPossTS(iStart : iStop);
-        tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN); % timevec for RNN
+        
+        tData = training_tData{trl_num}; nsp_Data = length(tData); 
+        tRNN = tData(1) : dtRNN : tData(end); nsp_RNN = length(tRNN);
         
         % initialize weight matrix
         if trainFromPrev && iTrlID == train_trl_IDs(start_trl_num) && exist('prevJ', 'var') && ~isempty(prevJ)
@@ -198,87 +189,85 @@ if trainRNN % TRAIN
             [~, iMdlSample(i)] = min(abs(tData(i) - tRNN));
         end
         
+        all_coinciding_t = iMdlSample + dtFactor;
+        
         % get indices for feedback term if generative
         feedback_indices = [1, 2 : dtFactor: (nsp_RNN - ((n_pred_steps - 1) * dtFactor) - (2 * dtFactor) + 1)]'; % TO DO TEST W N PRED STEPS > 1! either way should be indexed with iLearn, which goes max to nsp_Data - n_pred_steps
         
         % set up white noise inputs (from CURBD)
-        if strcmp(ntwk_flavor, 'descriptive') || use_synthetic_targets || add_white_noise
-            white_noise = get_frozen_input_WN(nUnits, ampWN, tauWN, ampInWN, nsp_RNN, dtRNN);
-            if use_synthetic_targets  % add noise to targets if using synthetic targets
-                wn_term = white_noise(:, 1 : dtFactor : nsp_RNN);
-                inputs = inputs + wn_term(:, 1 : end - n_pred_steps);
-                targets = targets + wn_term(:, 1 + n_pred_steps : end);
-            end
+        if add_white_noise
+            WN = get_frozen_input_WN(nUnits, ampWN, tauWN, ampInWN, nsp_RNN, dtRNN);
         end
         
-        % initialize midputs
+        % initialize
         R = zeros(nUnits, nsp_RNN); % rate matrix - firing rates of neurons
-        sum_MSE_over_runs = NaN(1, nRunTrain); mean_MSE_over_runs = NaN(1, nRunTrain); pVars = zeros(1, nRunTrain);
+        sum_MSE_over_runs = NaN(1, nRunTrain); mean_MSE_over_runs = NaN(1, nRunTrain); pVars = zeros(1, nRunTrain); cross_entropy = zeros(1, nRunTrain); 
         JR = zeros(nUnits, nsp_RNN); % z(t) for the output readout unit
-        PJ = alpha * eye(nUnits); % initialize learning update matrix (see Sussillo and Abbot, 2009). dim are pN x pN where p=fraction of neurons to modify - here it's all of them
-        
-        % addition of a readout unit!
-        z_out = zeros(1, nsp_RNN); % z(t) for the output read out unit, TO DO: 2023-01-20: CURRENTLY AN ORPHAN, HOW TO MAKE OPTIONAL?
-        f_readout = rescale(median(targets, 1), -1, 1); % TO DO: IDK THIS IS ARBITRARY RIGHT NOW
+        PJ = alpha * eye(nUnits); % learning update matrix (see Sussillo and Abbot, 2009); dim are pN x pN where p=fraction of neurons to modify - here it's all of them
+        z_out = zeros(1, nsp_RNN); % readout unit
+        % currently arbitrary readout target definition
+        f_readout = rescale(median(targets, 1), -1, 1); f_readout_bin = double(f_readout >= 0); 
         
         % set up for histogram if you're plotting
         max_count = nsp_Data - n_pred_steps;
-        if plotStatus && ismember(trl_num, floor(linspace(1, nTrlsTrain, 5))) 
+        if plotStatus && ismember(trl_num, floor(linspace(1, nTrlsTrain, 4))) 
             f = figure('color', 'w', 'Position', [100 100 1900 750]); axNum = 0; f2 = figure('color', 'w', 'Position', [100 100 1900 500]);
             axs = arrayfun( @(i) subplot(1, 4, i, 'NextPlot', 'add', 'box', 'off', 'tickdir', 'out', 'fontsize', 12, 'fontweight', 'bold'), 1 : 4);
-            paramText = sprintf(['TRAINING\nkernel = \t', num2str(smoothWidth), '\nn_t_r_l_s = \t', num2str(length([train_trl_IDs, test_trl_IDs])), '\ng = \t', num2str(g), '\nP_0 = \t', num2str(alpha), '\ntau_R_N_N = \t', num2str(tauRNN), '\ntau_W_N = \t', num2str(tauWN), '\nw_W_N = \t', num2str(ampInWN), '\nn_i_t_e_r = \t', num2str(nRunTrain), '\ndt_D_a_t_a = \t', num2str(dtData), '\ndt_R_N_N = \t', num2str(dtRNN)  ]); % this at the end!
-            text(axs(4), 0.25 * range(get(axs(4), 'xlim')), 0.75 * range(get(axs(4), 'ylim')), paramText, 'fontsize', 14, 'fontweight', 'bold', 'horizontalalignment', 'center')
+            text(axs(4), 0.25 * range(get(axs(4), 'xlim')), 0.75 * range(get(axs(4), 'ylim')), paramText_train, 'fontsize', 14, 'fontweight', 'bold', 'horizontalalignment', 'center')
             set(axs(4), 'xtick', '', 'ytick', '')
-            progCompFigName = [rnnSubDir, RNNname, '_train', num2str(iTrlID), '_num', num2str(trl_num), '_runs'];
-            overallCompFigName = [rnnSubDir, RNNname, '_train', num2str(iTrlID), '_num', num2str(trl_num), '_overall'];
-            histName = [rnnSubDir, RNNname, '_train', num2str(iTrlID), '_num', num2str(trl_num), '_FR_hists'];
         end
         
         %% loop through training runs
         for nRun = 1 : nRunTrain
-            H = inputs(:, 1); % set initial condition to match target data (can initialize as random gaussian too!)
+            H = inputs(:, 1); % set initial condition
             R(:, 1) = tanh(H); % convert to currents through nonlinearity
             z_out(1) = w_out' * R(:, 1); % zi(t) = sum (Jij rj) over j
-            tLearn = 0; iLearn = 1; % keeps track of current time and last datapoint learned respectively
+            % tLearn = 0;
+            iLearn = 1; % keeps track of current time and last datapoint learned respectively
             MSE_over_steps = zeros(1, nsp_Data - n_pred_steps);
-            readout_error = zeros(1, nsp_Data - n_pred_steps);
-            
             for t = 2 : nsp_RNN - (n_pred_steps - 1) * dtFactor % 2 : nsp_RNN usually. this range will be identical for n_pred_steps < 2 as before
-                tLearn = tLearn + dtRNN; % index in actual RNN time
+                % tLearn = tLearn + dtRNN; 
                 R(:, t) = tanh(H); % generate output / compute next RNN step
-                z_out(t) = w_out' * R(:, t); % 1) TO DO 2023-01-20: add computing readout via dot of H and randomly initailized readout units
+                z_out(t) = w_out' * R(:, t);
                 
-                switch ntwk_flavor
-                    case 'descriptive'
-                        variable_term = white_noise(:, t);
-                    case '1step'
-                        variable_term = inputs(:, iLearn);
-                    case 'generative'
-                        variable_term = R(:, feedback_indices(iLearn)); % feedback_indices should = iMdlSample(iLearn - 1) + 1, except at iLearn = 1 (then it should = 1)
+%                 switch ntwk_flavor
+%                     case 'descriptive'
+%                         variable_term = zeros(nUnits, 1);
+%                     case '1step'
+%                         variable_term = inputs(:, iLearn);
+%                     case 'generative'
+%                         variable_term = R(:, feedback_indices(iLearn)); % feedback_indices == iMdlSample(iLearn - 1) + 1, except at iLearn = 1 (then it should = 1)
+%                 end
+                if isequal(ntwk_flavor, 'descriptive')
+                    variable_term = zeros(nUnits, 1);
+                elseif isequal(ntwk_flavor, '1step')
+                    variable_term = inputs(:, iLearn);
+                elseif isequal(ntwk_flavor, 'generative')
+                    variable_term = R(:, feedback_indices(iLearn)); % feedback_indices == iMdlSample(iLearn - 1) + 1, except at iLearn = 1 (then it should = 1)
                 end
                 
-                if add_white_noise && ~isequal(ntwk_flavor, 'descriptive') % TO DO: ADD THIS TO TEST
-                    variable_term = variable_term + white_noise(:, t);
+                if add_white_noise
+                    variable_term = variable_term + WN(:, t);
                 end
                 
                 JR(:, t) = J * R(:, t) + variable_term;
                 H = H + dtRNN * (-H + JR(:, t)) / tauRNN; % "hidden" activity updated w the update term, p much equivalent to: H + (dtRNN / tauRNN) * (-H + JR(:, tt));
-                % 2) to do: run thru sigmoid (or not depending on loss metric how tO)
-                if tLearn >= dtData % update J if the RNN time coincides with a data point
-                    tLearn = 0;
+                if t == all_coinciding_t(iLearn) % iMdlSample(iLearn) + dtFactor % tLearn >= dtData % update J if the RNN time coincides with a data point
+                    % tLearn = 0;
+                    % assert(t == iMdlSample(iLearn) + dtFactor)
                     error = R(:, t) - targets(:, iLearn);
-                    readout_error(iLearn) = z_out(t) - f_readout(iLearn);
-                    % 3) to do: add cross-entropy??? error term so that error_final = current error + readout error comparing output label generated by ntwk (line 227) w synthetic label previously generated
+                    readout_error = z_out(t) - f_readout(iLearn);
+                    % readout_error = get_cross_entropy(f_readout_bin(iLearn), sigmoid(z_out(t)));
                     MSE_over_steps(iLearn) = mean(error .^ 2);
                     iLearn = iLearn + 1; % update learning index
                     if (nRun <= nRunTrain)
-                        k = PJ * R(:, t); % N x 1 (update term: sq mdl activity)
+                        k = PJ * R(:, t); % N x 1 
                         rPr = R(:, t)' * k; % 1 x 1; inv xcorr of ntwk rates (when you square something it magnifies the sensitivity to changes)
                         c = 1 / (1 + rPr); % tune learning rate by looking at magnitude of model activity. if big changes in FRs and wanna move quickly/take big steps (aka momentum). as get closer, don't wanna overshoot, so take smaller steps
                         PJ = PJ - c * (k * k'); % use squared firing rates (R * R^T) to update PJ - maybe momentum effect?
                         J(:, :) = J(:, :) - c * error * k'; % update J (pre-syn wts adjusted according to post-syn target)
                         if add_readout_unit
-                            w_out = w_out - (c * readout_error(iLearn - 1) * k')'; % adjust reaodut weights using same c and P as for J
+                            w_out = w_out - (c * readout_error * k')'; % adjust reaodut weights using same c and P as for J
                         end
                     end
                 end
@@ -288,13 +277,17 @@ if trainRNN % TRAIN
             rModelSample = R(iPredict, iMdlSample);
             pVar = 1 - ( norm(targets(iPredict, :) - rModelSample, 'fro' ) / ( sqrt(nPredict * (nsp_Data - n_pred_steps)) * stdData) ).^2;
             pVars(nRun) = pVar; mean_MSE_over_runs(nRun) = mean(MSE_over_steps); sum_MSE_over_runs(nRun) = sum(MSE_over_steps);
-            if ismember(nRun, [1 250 nRunTrain]) && ismember(trl_num, floor(linspace(1, nTrlsTrain, 5)))
+            cross_entropy(nRun) = readout_error(end);
+            if ismember(nRun, [1 250 nRunTrain]) && ismember(trl_num, floor(linspace(1, nTrlsTrain, 4)))
                 axNum = axNum + 1;
                 plot_costa_RNN_param_comparisons(f2, axs, [RNNname(5 : end), ' (ID: ', num2str(iTrlID), ' / # ', num2str(trl_num), '):'], nPredict, targets(iPredict, :), R(iPredict, iMdlSample), tRNN(:, iMdlSample), tData(n_pred_steps + 1 : end), nRun, pVars, MSE_over_steps, axNum)
             end
         end
         if plotStatus
-            if ismember(trl_num, floor(linspace(1, nTrlsTrain, 5)))
+            if ismember(trl_num, floor(linspace(1, nTrlsTrain, 4)))
+                progCompFigName = [rnnSubDir, RNNname, '_train', num2str(iTrlID), '_num', num2str(trl_num), '_runs'];
+                overallCompFigName = [rnnSubDir, RNNname, '_train', num2str(iTrlID), '_num', num2str(trl_num), '_overall'];
+                histName = [rnnSubDir, RNNname, '_train', num2str(iTrlID), '_num', num2str(trl_num), '_FR_hists'];
                 set(0, 'currentfigure', f2); print('-dtiff', '-r400', progCompFigName)
                 set(0, 'currentfigure', f); fTitle = ['[', RNNname, ']: train trial ID ', num2str(iTrlID), ' (#', num2str(trl_num), ')'];
                 plot_costa_RNN_progress(f, nUnits, targets(:, :), R(:, iMdlSample), tRNN(:, iMdlSample), tData(n_pred_steps + 1 : end), nRun, pVars, sum_MSE_over_runs, trainRNN, '')
@@ -314,16 +307,14 @@ if trainRNN % TRAIN
             train_trl_IDs, test_trl_IDs, nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, R(:, iMdlSample), [], [], [], ...
             dtRNN, dtData, w_out, z_out, J, J0, [], [], sum_MSE_over_runs, mean_MSE_over_runs, pVars, [], ...
             iPredict, ntwk_flavor, n_pred_steps, use_reservoir, use_synthetic_targets, add_readout_unit, add_white_noise, trainAllUnits, nTrlsIncluded, ...
-            MAE, MSE, RMSE);
+            MAE, MSE, RMSE, f_readout_bin, []);
         if saveMdl
             save([rnnSubDir, RNNname, '_train', num2str(iTrlID), '_num', num2str(trl_num) '.mat'], 'RNN', '-v7.3')
         end
         clear RNN, trl_num = trl_num + 1; close all; toc % housekeeping
     end
 else % TEST
-    % clearvars training_inputs training_targets training_tData
     start_trl_num = 1; trl_num = start_trl_num;
-    % if condition met showing we're at end of training, J is J from end of training full training set
     if ~exist('J', 'var') % at present you run testing and training separately (not in same script call)
         fprintf('Using J from last trained trial.')
         J_test = prevJ;
@@ -335,6 +326,7 @@ else % TEST
     pVars_test = zeros(nTrlsTest, nRunTest); sum_MSE_over_runs_test = zeros(nTrlsTest, nRunTest); mean_MSE_over_runs_test = zeros(nTrlsTest, nRunTest);
     for iTrlID = test_trl_IDs(start_trl_num : end)
         fprintf('\n'), fprintf([RNNname, ': testing trial ', num2str(iTrlID), ', #=', num2str(trl_num), '...']), tic
+        
         inputs = testing_inputs{trl_num};
         switch ntwk_flavor
             case 'descriptive'
@@ -349,32 +341,26 @@ else % TEST
         for i = 1 : nsp_Data - n_pred_steps
             [~, iMdlSample_test(i)] = min(abs(tData(i) - tRNN));
         end
-        
+        all_coinciding_t = iMdlSample_test + dtFactor;
+
         feedback_indices = [1, 2 : dtFactor: (nsp_RNN - ((n_pred_steps - 1) * dtFactor) - (2 * dtFactor) + 1)]'; % TO DO TEST W N PRED STEPS > 1! either way should be indexed with iLearn, which goes max to nsp_Data - n_pred_steps
         
-        if strcmp(ntwk_flavor, 'descriptive') || use_synthetic_targets || add_white_noise
-            white_noise = get_frozen_input_WN(nUnits, ampWN, tauWN, ampInWN, nsp_RNN, dtRNN);
-            if use_synthetic_targets % add noise if using synthetic targets
-                wn_term = white_noise(:, 1 : dtFactor : nsp_RNN);
-                inputs = inputs + wn_term(:, 1 : end - n_pred_steps);
-                targets = targets + wn_term(:, 1 + n_pred_steps : end);
-            end
+        if add_white_noise
+            WN = get_frozen_input_WN(nUnits, ampWN, tauWN, ampInWN, nsp_RNN, dtRNN);
         end
+        
         R_test = zeros(nUnits, nsp_RNN); JR_test = zeros(nUnits, nsp_RNN);
         
-        % addition of a readout unit!
-        z_out_test = zeros(1, nsp_RNN); % z(t) for the output read out unit, TO DO: 2023-01-20: CURRENTLY AN ORPHAN, HOW TO MAKE OPTIONAL?
-        f_readout = rescale(median(targets, 1), -1, 1); % TO DO: IDK THIS IS ARBITRARY RIGHT NOW
+        % addition of a readout unit w kinda arbitrary targets!
+        z_out_test = zeros(1, nsp_RNN);
+        f_readout = rescale(median(targets, 1), -1, 1); f_readout_bin = double(f_readout >= 0);
+
         max_count = nsp_Data - n_pred_steps; % set up for histogram
-        if plotStatus && ismember(trl_num, floor(linspace(1, nTrlsTest, 5))) % plot progress as we tweak parameters
+        if plotStatus && ismember(trl_num, floor(linspace(1, nTrlsTest, 4))) % plot progress as we tweak parameters
             f = figure('color', 'w', 'Position', [100 100 1900 750]); f2 = figure('color', 'w', 'Position', [100 100 1900 500]);
             axs = arrayfun( @(i) subplot(1, 4, i, 'NextPlot', 'add', 'box', 'off', 'tickdir', 'out', 'fontsize', 12, 'fontweight', 'bold'), 1 : 4);
-            paramText = sprintf(['TESTING\nkernel = \t', num2str(smoothWidth), '\nn_t_r_l_s = \t', num2str(length([train_trl_IDs, test_trl_IDs])), '\ng = \t', num2str(g), '\nP_0 = \t', num2str(alpha), '\ntau_R_N_N = \t', num2str(tauRNN), '\ntau_W_N = \t', num2str(tauWN), '\nw_W_N = \t', num2str(ampInWN), '\nn_i_t_e_r = \t', num2str(nRunTrain), '\ndt_D_a_t_a = \t', num2str(dtData), '\ndt_R_N_N = \t', num2str(dtRNN)  ]);
-            text(axs(4), 0.25 * range(get(axs(4), 'xlim')), 0.75 * range(get(axs(4), 'ylim')), paramText, 'fontsize', 14, 'fontweight', 'bold', 'horizontalalignment', 'center')
+            text(axs(4), 0.25 * range(get(axs(4), 'xlim')), 0.75 * range(get(axs(4), 'ylim')), paramText_test, 'fontsize', 14, 'fontweight', 'bold', 'horizontalalignment', 'center')
             axNum = 0; set(axs(4), 'xtick', '', 'ytick', '')
-            progCompFigName = [rnnSubDir, RNNname, '_test', num2str(iTrlID), '_num', num2str(trl_num), '_runs'];
-            overallCompFigName = [rnnSubDir, RNNname, '_test', num2str(iTrlID), '_num', num2str(trl_num), '_overall'];
-            histName = [rnnSubDir, RNNname, '_test', num2str(iTrlID), '_num', num2str(trl_num), '_FR_hists'];
         end
         
         %% loop through testing runs
@@ -382,34 +368,40 @@ else % TEST
             H = inputs(:, 1);
             R_test(:, 1) = tanh(H);
             z_out_test(1) = w_out_test' * R_test(:, 1);
-            tLearn = 0; iLearn = 1;
+            % tLearn = 0;
+            iLearn = 1;
             MSE_over_steps_test = zeros(1, nsp_Data - n_pred_steps);
-            readout_error = zeros(1, nsp_Data - n_pred_steps);
             for t = 2 : nsp_RNN - (n_pred_steps - 1) * dtFactor 
-                tLearn = tLearn + dtRNN;
+                % tLearn = tLearn + dtRNN;
                 R_test(:, t) = tanh(H);
                 z_out_test(t) = w_out_test' * R_test(:, t);
-                
-                switch ntwk_flavor
-                    case 'descriptive'
-                        variable_term = white_noise(:, t);
-                    case '1step'
-                        variable_term = inputs(:, iLearn);
-                    case 'generative'
-                        variable_term = R_test(:, feedback_indices(iLearn));
+%                 switch ntwk_flavor
+%                     case 'descriptive'
+%                         variable_term = zeros(nUnits, 1);
+%                     case '1step'
+%                         variable_term = inputs(:, iLearn);
+%                     case 'generative'
+%                         variable_term = R_test(:, feedback_indices(iLearn));
+%                 end
+
+                if isequal(ntwk_flavor, 'descriptive')
+                    variable_term = zeros(nUnits, 1);
+                elseif isequal(ntwk_flavor, '1step')
+                    variable_term = inputs(:, iLearn);
+                elseif isequal(ntwk_flavor, 'generative')
+                    variable_term = R_test(:, feedback_indices(iLearn)); % feedback_indices == iMdlSample(iLearn - 1) + 1, except at iLearn = 1 (then it should = 1)
                 end
                 
-                if add_white_noise && ~isequal(ntwk_flavor, 'descriptive') 
-                    variable_term = variable_term + white_noise(:, t);
+                if add_white_noise
+                    variable_term = variable_term + WN(:, t);
                 end
-                
                 JR_test(:, t) = J_test * R_test(:, t) + variable_term;
                 H = H + dtRNN * (-H + JR_test(:, t)) / tauRNN;
-                
-                if tLearn >= dtData
-                    tLearn = 0;
+                if t == all_coinciding_t(iLearn)% iMdlSample_test(iLearn) + dtFactor % tLearn >= dtData
+                    % tLearn = 0;
                     error = R_test(:, t) - targets(:, iLearn);
-                    readout_error(iLearn) = z_out_test(t) - f_readout(iLearn);
+                    readout_error = z_out_test(t) - f_readout(iLearn);
+                    % readout_error = get_cross_entropy(f_readout_bin(iLearn), sigmoid(z_out_test(t))); 
                     MSE_over_steps_test(iLearn) = mean(error .^ 2);
                     iLearn = iLearn + 1;
                 end
@@ -417,13 +409,16 @@ else % TEST
             rModelSample_test = R_test(iPredict, iMdlSample_test);
             pVar = 1 - ( norm(targets(iPredict, :) - rModelSample_test, 'fro' ) / ( sqrt(nPredict * (nsp_Data - n_pred_steps)) * stdData_test) ) .^ 2;
             pVars_test(trl_num, nRun) = pVar; mean_MSE_over_runs_test(trl_num, nRun) = mean(MSE_over_steps_test); sum_MSE_over_runs_test(trl_num, nRun) = sum(MSE_over_steps_test);
-            if ismember(nRun, [1 250 nRunTrain]) && ismember(trl_num, floor(linspace(1, nTrlsTest, 5)))
+            if ismember(nRun, [1 250 nRunTrain]) && ismember(trl_num, floor(linspace(1, nTrlsTest, 4)))
                 axNum = axNum + 1;
                 plot_costa_RNN_param_comparisons(f2, axs, [RNNname(5 : end), ' (ID: ', num2str(iTrlID), ' / # ', num2str(trl_num), '):'], nPredict, targets(iPredict, :), R_test(iPredict, iMdlSample_test), tRNN(:, iMdlSample_test), tData(n_pred_steps + 1 : end), nRun, pVars_test(trl_num), MSE_over_steps_test, axNum)
             end
         end
         if plotStatus
-            if ismember(trl_num, floor(linspace(1, nTrlsTest, 5)))
+            if ismember(trl_num, floor(linspace(1, nTrlsTest, 4)))
+                progCompFigName = [rnnSubDir, RNNname, '_test', num2str(iTrlID), '_num', num2str(trl_num), '_runs'];
+                overallCompFigName = [rnnSubDir, RNNname, '_test', num2str(iTrlID), '_num', num2str(trl_num), '_overall'];
+                histName = [rnnSubDir, RNNname, '_test', num2str(iTrlID), '_num', num2str(trl_num), '_FR_hists'];
                 set(0, 'currentfigure', f2); print('-dtiff', '-r400', progCompFigName)
                 set(0, 'currentfigure', f); fTitle = ['[', RNNname, ']: test trial ID ', num2str(iTrlID), ' (#', num2str(trl_num), ')'];
                 plot_costa_RNN_progress(f, nUnits, targets(:, :), R_test(:, iMdlSample_test), tRNN(:, iMdlSample_test), tData(n_pred_steps + 1 : end), nRun, pVars_test(trl_num, nRun), MSE_over_steps_test, trainRNN, fTitle)
@@ -443,7 +438,7 @@ else % TEST
             train_trl_IDs, test_trl_IDs, nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, trl_num, setID, R_test(:, iMdlSample_test), [], [], [], ...
             dtRNN, dtData, w_out_test, z_out_test, J_test, [], [], [], sum_MSE_over_runs_test, mean_MSE_over_runs_test, pVars_test, [], ...
             iPredict, ntwk_flavor, n_pred_steps, use_reservoir, use_synthetic_targets, add_readout_unit, add_white_noise, trainAllUnits, nTrlsIncluded, ...
-            MAE, MSE, RMSE);
+            MAE, MSE, RMSE, f_readout_bin, []);
         if saveMdl
             save([rnnSubDir, RNNname, '_test', num2str(iTrlID), '_num', num2str(trl_num) '.mat'], 'RNN', '-v7.3')
         end
@@ -509,7 +504,7 @@ else % TEST
             train_trl_IDs, test_trl_IDs, nUnits, nTrls, nSets, arrayUnit, arrayRgns, iTrlID, nTrlsTest, setID, R_test(:, iMdlSample_test), [], [], [], ...
             dtRNN, dtData, [], [], [], [], [], [], sum_MSE_over_runs_test, mean_MSE_over_runs_test, pVars_test, [], ...
             iPredict, ntwk_flavor, n_pred_steps, use_reservoir, use_synthetic_targets, add_readout_unit, add_white_noise, trainAllUnits, nTrlsIncluded, ...
-            MAE, MSE, RMSE);
+            MAE, MSE, RMSE, [], []);
         save([rnnSubDir, RNNname, '_metrics.mat'], 'currentParams', ...
             'avg_final_pVar_train', 'avg_final_mean_MSE_train', 'avg_final_sum_MSE_train', ...
             'avg_final_pVar_test', 'avg_final_mean_MSE_test', 'avg_final_sum_MSE_test', ...
